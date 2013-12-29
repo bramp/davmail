@@ -1661,8 +1661,12 @@ public class ImapConnection extends AbstractConnection {
     }
 
     protected abstract static class AbstractRangeIterator implements Iterator<ExchangeSession.Message> {
-        ExchangeSession.MessageList messages;
+        final ExchangeSession.MessageList messages;
         int currentIndex;
+
+        protected AbstractRangeIterator(ExchangeSession.MessageList messages) {
+            this.messages = messages;
+        }
 
         protected int getCurrentIndex() {
             return currentIndex;
@@ -1676,7 +1680,7 @@ public class ImapConnection extends AbstractConnection {
         long endUid;
 
         protected UIDRangeIterator(ExchangeSession.MessageList messages, String value) {
-            this.messages = messages;
+            super(messages);
             ranges = value.split(",");
         }
 
@@ -1759,7 +1763,7 @@ public class ImapConnection extends AbstractConnection {
         long endUid;
 
         protected RangeIterator(ExchangeSession.MessageList messages, String value) {
-            this.messages = messages;
+            super(messages);
             ranges = value.split(",");
         }
 
