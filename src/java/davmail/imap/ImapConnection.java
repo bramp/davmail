@@ -29,6 +29,8 @@ import davmail.exception.HttpForbiddenException;
 import davmail.exception.HttpNotFoundException;
 import davmail.exception.InsufficientStorageException;
 import davmail.exchange.*;
+import davmail.io.PartOutputStream;
+import davmail.io.PartialOutputStream;
 import davmail.ui.tray.DavGatewayTray;
 import davmail.util.IOUtil;
 import davmail.util.StringUtil;
@@ -1653,93 +1655,6 @@ public class ImapConnection extends AbstractConnection {
         int backslashindex = userName.indexOf('\\');
         if (backslashindex > 0) {
             userName = userName.substring(0, backslashindex) + userName.substring(backslashindex + 1);
-        }
-    }
-
-    /**
-     * Filter to output only headers, also count full size
-     */
-    private static final class PartOutputStream extends FilterOutputStream {
-        private static final int START = 0;
-        private static final int CR = 1;
-        private static final int CRLF = 2;
-        private static final int CRLFCR = 3;
-        private static final int BODY = 4;
-
-        private int state = START;
-        private int size;
-        private int bufferSize;
-        private final boolean writeHeaders;
-        private final boolean writeBody;
-        private final int startIndex;
-        private final int maxSize;
-
-        private PartOutputStream(OutputStream os, boolean writeHeaders, boolean writeBody,
-                                 int startIndex, int maxSize) {
-            super(os);
-            this.writeHeaders = writeHeaders;
-            this.writeBody = writeBody;
-            this.startIndex = startIndex;
-            this.maxSize = maxSize;
-        }
-
-        @Override
-        public void write(int b) throws IOException {
-            size++;
-            if (((state != BODY && writeHeaders) || (state == BODY && writeBody)) &&
-                    (size > startIndex) && (bufferSize < maxSize)
-                    ) {
-                super.write(b);
-                bufferSize++;
-            }
-            if (state == START) {
-                if (b == '\r') {
-                    state = CR;
-                }
-            } else if (state == CR) {
-                if (b == '\n') {
-                    state = CRLF;
-                } else {
-                    state = START;
-                }
-            } else if (state == CRLF) {
-                if (b == '\r') {
-                    state = CRLFCR;
-                } else {
-                    state = START;
-                }
-            } else if (state == CRLFCR) {
-                if (b == '\n') {
-                    state = BODY;
-                } else {
-                    state = START;
-                }
-            }
-        }
-    }
-
-    /**
-     * Partial output stream, start at startIndex and write maxSize bytes.
-     */
-    private static final class PartialOutputStream extends FilterOutputStream {
-        private int size;
-        private int bufferSize;
-        private final int startIndex;
-        private final int maxSize;
-
-        private PartialOutputStream(OutputStream os, int startIndex, int maxSize) {
-            super(os);
-            this.startIndex = startIndex;
-            this.maxSize = maxSize;
-        }
-
-        @Override
-        public void write(int b) throws IOException {
-            size++;
-            if ((size > startIndex) && (bufferSize < maxSize)) {
-                super.write(b);
-                bufferSize++;
-            }
         }
     }
 

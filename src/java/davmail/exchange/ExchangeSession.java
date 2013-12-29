@@ -25,6 +25,7 @@ import davmail.exception.DavMailException;
 import davmail.exception.WebdavNotAvailableException;
 import davmail.http.DavGatewayHttpClientFacade;
 import davmail.http.DavGatewayOTPPrompt;
+import davmail.io.MimeOutputStreamWriter;
 import davmail.ui.NotificationDialog;
 import davmail.util.StringUtil;
 import org.apache.commons.httpclient.*;

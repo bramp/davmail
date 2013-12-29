@@ -22,7 +22,7 @@ import davmail.AbstractConnection;
 import davmail.BundleMessage;
 import davmail.DavGateway;
 import davmail.exception.DavMailException;
-import davmail.exchange.DoubleDotInputStream;
+import davmail.io.DoubleDotInputStream;
 import davmail.exchange.ExchangeSessionFactory;
 import davmail.ui.tray.DavGatewayTray;
 

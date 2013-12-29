@@ -18,8 +18,8 @@
  */
 package davmail;
 
-import davmail.exception.DavMailException;
 import davmail.exchange.ExchangeSession;
+import davmail.io.LineReaderInputStream;
 import davmail.ui.tray.DavGatewayTray;
 import org.apache.commons.codec.binary.Base64;
 
@@ -34,80 +34,6 @@ public class AbstractConnection extends Thread {
 
     protected enum State {
         INITIAL, LOGIN, USER, PASSWORD, AUTHENTICATED, STARTMAIL, RECIPIENT, MAILDATA
-    }
-
-    protected static class LineReaderInputStream extends PushbackInputStream {
-        final String encoding;
-
-        /**
-         * @inheritDoc
-         */
-        protected LineReaderInputStream(InputStream in, String encoding) {
-            super(in);
-            if (encoding == null) {
-                this.encoding = "ASCII";
-            } else {
-                this.encoding = encoding;
-            }
-        }
-
-        public String readLine() throws IOException {
-            ByteArrayOutputStream baos = null;
-            int b;
-            while ((b = read()) > -1) {
-                if (b == '\r') {
-                    int next = read();
-                    if (next != '\n') {
-                        unread(next);
-                    }
-                    break;
-                } else if (b == '\n') {
-                    break;
-                }
-                if (baos == null) {
-                    baos = new ByteArrayOutputStream();
-                }
-                baos.write(b);
-            }
-            if (baos != null) {
-                return new String(baos.toByteArray(), encoding);
-            } else {
-                return null;
-            }
-        }
-
-        /**
-         * Read byteSize bytes from inputStream, return content as String.
-         *
-         * @param byteSize content size
-         * @return content
-         * @throws IOException on error
-         */
-        public String readContentAsString(int byteSize) throws IOException {
-            return new String(readContent(byteSize), encoding);
-        }
-
-        /**
-         * Read byteSize bytes from inputStream, return content as byte array.
-         *
-         * @param byteSize content size
-         * @return content
-         * @throws IOException on error
-         */
-        public byte[] readContent(int byteSize) throws IOException {
-            byte[] buffer = new byte[byteSize];
-            int startIndex = 0;
-            int count = 0;
-            while (count >= 0 && startIndex < byteSize) {
-                count = read(buffer, startIndex, byteSize - startIndex);
-                startIndex += count;
-            }
-            if (startIndex < byteSize) {
-                throw new DavMailException("EXCEPTION_END_OF_STREAM");
-            }
-
-            return buffer;
-        }
     }
 
     protected final Socket client;

@@ -21,10 +21,9 @@ package davmail.smtp;
 import davmail.AbstractDavMailTestCase;
 import davmail.DavGateway;
 import davmail.Settings;
-import davmail.exchange.DoubleDotOutputStream;
+import davmail.io.DoubleDotOutputStream;
 import davmail.exchange.ExchangeSession;
 import davmail.exchange.ExchangeSessionFactory;
-import davmail.util.IOUtil;
 import org.apache.commons.codec.binary.Base64;
 
 import javax.mail.MessagingException;

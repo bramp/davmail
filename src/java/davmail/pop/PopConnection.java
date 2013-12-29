@@ -22,17 +22,16 @@ import davmail.AbstractConnection;
 import davmail.BundleMessage;
 import davmail.DavGateway;
 import davmail.Settings;
-import davmail.exchange.DoubleDotOutputStream;
+import davmail.io.DoubleDotOutputStream;
 import davmail.exchange.ExchangeSession;
 import davmail.exchange.ExchangeSessionFactory;
 import davmail.exchange.MessageLoadThread;
+import davmail.io.TopOutputStream;
 import davmail.ui.tray.DavGatewayTray;
 import davmail.util.IOUtil;
 import org.apache.log4j.Logger;
 
-import java.io.FilterOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.Socket;
 import java.net.SocketException;
 import java.util.Date;
@@ -303,59 +302,6 @@ public class PopConnection extends AbstractConnection {
 
     protected void sendERR(String message) throws IOException {
         sendClient("-ERR ", message.replaceAll("\\n", " "));
-    }
-
-    /**
-     * Filter to limit output lines to max body lines after header
-     */
-    private static final class TopOutputStream extends FilterOutputStream {
-        private static final int START = 0;
-        private static final int CR = 1;
-        private static final int CRLF = 2;
-        private static final int CRLFCR = 3;
-        private static final int BODY = 4;
-
-        private int maxLines;
-        private int state = START;
-
-        private TopOutputStream(OutputStream os, int maxLines) {
-            super(os);
-            this.maxLines = maxLines;
-        }
-
-        @Override
-        public void write(int b) throws IOException {
-            if (state != BODY || maxLines > 0) {
-                super.write(b);
-            }
-            if (state == BODY) {
-                if (b == '\n') {
-                    maxLines--;
-                }
-            } else if (state == START) {
-                if (b == '\r') {
-                    state = CR;
-                }
-            } else if (state == CR) {
-                if (b == '\n') {
-                    state = CRLF;
-                } else {
-                    state = START;
-                }
-            } else if (state == CRLF) {
-                if (b == '\r') {
-                    state = CRLFCR;
-                } else {
-                    state = START;
-                }
-            } else if (state == CRLFCR) {
-                if (b == '\n') {
-                    state = BODY;
-                } else {
-                    state = START;
-                }
-            }
-        }
     }
 
 }
