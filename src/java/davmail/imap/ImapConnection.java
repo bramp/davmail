@@ -702,8 +702,8 @@ public class ImapConnection extends AbstractConnection {
     /**
      * Send expunge untagged response for removed IMAP message uids.
      *
-     * @param previousImapUidList uid list before refresh
-     * @param imapUidList         uid list after refresh
+     * @param previousImapFlagMap uid list before refresh
+     * @param imapFlagMap         uid list after refresh
      * @throws IOException on error
      */
     private void handleRefresh(TreeMap<Long, String> previousImapFlagMap, TreeMap<Long, String> imapFlagMap) throws IOException {
@@ -730,6 +730,12 @@ public class ImapConnection extends AbstractConnection {
         protected StringBuilder buffer;
         protected ExchangeSession.Message message;
 
+        /**
+         *
+         * @param os client socket output stream
+         * @param buffer current output buffer
+         * @param message message
+         */
         protected MessageWrapper(OutputStream os, StringBuilder buffer, ExchangeSession.Message message) {
             this.os = os;
             this.buffer = buffer;
@@ -743,10 +749,6 @@ public class ImapConnection extends AbstractConnection {
 
         /**
          * Monitor full message download
-         *
-         * @param os client socket output stream
-         * @param buffer current output buffer
-         * @param message message
          */
         protected void loadMessage() throws IOException, MessagingException {
             if (!message.isLoaded()) {
