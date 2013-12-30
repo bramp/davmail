@@ -624,9 +624,7 @@ public abstract class ExchangeSession {
             LOGGER.debug("Authentication form not found at " + initmethod.getURI() + ", trying default url");
             logonMethod = new PostMethod("/owa/auth/owaauth.dll");
         }
-        logonMethod = postLogonMethod(httpClient, logonMethod, userName, password);
-
-        return logonMethod;
+        return postLogonMethod(httpClient, logonMethod, userName, password);
     }
 
     protected HttpMethod submitLanguageSelectionForm(HttpMethod logonMethod) throws IOException {

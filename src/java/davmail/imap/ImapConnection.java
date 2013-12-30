@@ -54,8 +54,11 @@ import java.util.*;
 public class ImapConnection extends AbstractConnection {
     private static final Logger LOGGER = Logger.getLogger(ImapConnection.class);
 
+    protected final int imapIdleDelay;
+    protected final String capabilities;
+
     protected String baseMailboxPath;
-    ExchangeSession.Folder currentFolder;
+    protected ExchangeSession.Folder currentFolder;
 
     /**
      * Initialize the streams and start the thread.
@@ -64,18 +67,17 @@ public class ImapConnection extends AbstractConnection {
      */
     public ImapConnection(Socket clientSocket) {
         super(ImapConnection.class.getSimpleName(), clientSocket, "UTF-8");
-    }
 
-    @Override
-    public void run() {
-        final String capabilities;
-        int imapIdleDelay = Settings.getIntProperty("davmail.imapIdleDelay") * 60;
+        imapIdleDelay = Settings.getIntProperty("davmail.imapIdleDelay") * 60;
         if (imapIdleDelay > 0) {
             capabilities = "CAPABILITY IMAP4REV1 AUTH=LOGIN IDLE MOVE";
         } else {
             capabilities = "CAPABILITY IMAP4REV1 AUTH=LOGIN MOVE";
         }
+    }
 
+    @Override
+    public void run() {
         String line;
         String commandId = null;
         IMAPTokenizer tokens;
@@ -106,157 +108,27 @@ public class ImapConnection extends AbstractConnection {
                         if ("capability".equalsIgnoreCase(command)) {
                             sendClient("* " + capabilities);
                             sendClient(commandId + " OK CAPABILITY completed");
+
                         } else if ("login".equalsIgnoreCase(command)) {
-                            parseCredentials(tokens);
-                            // detect shared mailbox access
-                            splitUserName();
-                            try {
-                                session = ExchangeSessionFactory.getInstance(userName, password);
-                                sendClient(commandId + " OK Authenticated");
-                                state = State.AUTHENTICATED;
-                            } catch (Exception e) {
-                                DavGatewayTray.error(e);
-                                if (Settings.getBooleanProperty("davmail.enableKerberos")) {
-                                    sendClient(commandId + " NO LOGIN Kerberos authentication failed");
-                                } else {
-                                    sendClient(commandId + " NO LOGIN failed");
-                                }
-                                state = State.INITIAL;
-                            }
+                            handleLogin(tokens, commandId, command);
+
                         } else if ("AUTHENTICATE".equalsIgnoreCase(command)) {
-                            if (tokens.hasMoreTokens()) {
-                                String authenticationMethod = tokens.nextToken();
-                                if ("LOGIN".equalsIgnoreCase(authenticationMethod)) {
-                                    try {
-                                        sendClient("+ " + base64Encode("Username:"));
-                                        state = State.LOGIN;
-                                        userName = base64Decode(readClient());
-                                        // detect shared mailbox access
-                                        splitUserName();
-                                        sendClient("+ " + base64Encode("Password:"));
-                                        state = State.PASSWORD;
-                                        password = base64Decode(readClient());
-                                        session = ExchangeSessionFactory.getInstance(userName, password);
-                                        sendClient(commandId + " OK Authenticated");
-                                        state = State.AUTHENTICATED;
-                                    } catch (Exception e) {
-                                        DavGatewayTray.error(e);
-                                        sendClient(commandId + " NO LOGIN failed");
-                                        state = State.INITIAL;
-                                    }
-                                } else {
-                                    sendClient(commandId + " NO unsupported authentication method");
-                                }
-                            } else {
-                                sendClient(commandId + " BAD authentication method required");
-                            }
+                            handleAuth(tokens, commandId, command);
+
                         } else {
+                            // The following commands only work if AUTHed
+
                             if (state != State.AUTHENTICATED) {
                                 sendClient(commandId + " BAD command authentication required");
                             } else {
                                 // check for expired session
                                 session = ExchangeSessionFactory.getInstance(session, userName, password);
                                 if ("lsub".equalsIgnoreCase(command) || "list".equalsIgnoreCase(command)) {
-                                    if (tokens.hasMoreTokens()) {
-                                        String folderContext;
-                                        if (baseMailboxPath == null) {
-                                            folderContext = BASE64MailboxDecoder.decode(tokens.nextToken());
-                                        } else {
-                                            folderContext = baseMailboxPath + BASE64MailboxDecoder.decode(tokens.nextToken());
-                                        }
-                                        if (tokens.hasMoreTokens()) {
-                                            String folderQuery = folderContext + BASE64MailboxDecoder.decode(tokens.nextToken());
-                                            if (folderQuery.endsWith("%/%") && !"/%/%".equals(folderQuery)) {
-                                                List<ExchangeSession.Folder> folders = session.getSubFolders(folderQuery.substring(0, folderQuery.length() - 3), false);
-                                                for (ExchangeSession.Folder folder : folders) {
-                                                    sendClient("* " + command + " (" + folder.getFlags() + ") \"/\" \"" + BASE64MailboxEncoder.encode(folder.folderPath) + '\"');
-                                                    sendSubFolders(command, folder.folderPath, false);
-                                                }
-                                                sendClient(commandId + " OK " + command + " completed");
-                                            } else if (folderQuery.endsWith("%") || folderQuery.endsWith("*")) {
-                                                if ("/*".equals(folderQuery) || "/%".equals(folderQuery) || "/%/%".equals(folderQuery)) {
-                                                    folderQuery = folderQuery.substring(1);
-                                                    if ("%/%".equals(folderQuery)) {
-                                                        folderQuery = folderQuery.substring(0, folderQuery.length() - 2);
-                                                    }
-                                                    sendClient("* " + command + " (\\HasChildren) \"/\" \"/public\"");
-                                                }
-                                                if ("*%".equals(folderQuery)) {
-                                                    folderQuery = "*";
-                                                }
-                                                boolean recursive = folderQuery.endsWith("*") && !folderQuery.startsWith("/public");
-                                                sendSubFolders(command, folderQuery.substring(0, folderQuery.length() - 1), recursive);
-                                                sendClient(commandId + " OK " + command + " completed");
-                                            } else {
-                                                ExchangeSession.Folder folder = null;
-                                                try {
-                                                    folder = session.getFolder(folderQuery);
-                                                } catch (HttpForbiddenException e) {
-                                                    // access forbidden, ignore
-                                                    DavGatewayTray.debug(new BundleMessage("LOG_FOLDER_ACCESS_FORBIDDEN", folderQuery));
-                                                } catch (HttpNotFoundException e) {
-                                                    // not found, ignore
-                                                    DavGatewayTray.debug(new BundleMessage("LOG_FOLDER_NOT_FOUND", folderQuery));
-                                                } catch (HttpException e) {
-                                                    // other errors, ignore
-                                                    DavGatewayTray.debug(new BundleMessage("LOG_FOLDER_ACCESS_ERROR", folderQuery, e.getMessage()));
-                                                }
-                                                if (folder != null) {
-                                                    sendClient("* " + command + " (" + folder.getFlags() + ") \"/\" \"" + BASE64MailboxEncoder.encode(folder.folderPath) + '\"');
-                                                    sendClient(commandId + " OK " + command + " completed");
-                                                } else {
-                                                    sendClient(commandId + " NO Folder not found");
-                                                }
-                                            }
-                                        } else {
-                                            sendClient(commandId + " BAD missing folder argument");
-                                        }
-                                    } else {
-                                        sendClient(commandId + " BAD missing folder argument");
-                                    }
-                                } else if ("select".equalsIgnoreCase(command) || "examine".equalsIgnoreCase(command)) {
-                                    if (tokens.hasMoreTokens()) {
-                                        @SuppressWarnings({"NonConstantStringShouldBeStringBuffer"})
-                                        String folderName = BASE64MailboxDecoder.decode(tokens.nextToken());
-                                        if (baseMailboxPath != null && !folderName.startsWith("/")) {
-                                            folderName = baseMailboxPath + folderName;
-                                        }
-                                        try {
-                                            currentFolder = session.getFolder(folderName);
-                                            if (currentFolder.count() <= 500) {
-                                                // simple folder load
-                                                currentFolder.loadMessages();
-                                                sendClient("* " + currentFolder.count() + " EXISTS");
-                                            } else {
-                                                // load folder in a separate thread
-                                                LOGGER.debug("*");
-                                                os.write('*');
-                                                FolderLoadThread.loadFolder(currentFolder, os);
-                                                sendClient(" " + currentFolder.count() + " EXISTS");
-                                            }
+                                    handleList(tokens, commandId, command);
 
-                                            sendClient("* " + currentFolder.recent + " RECENT");
-                                            sendClient("* OK [UIDVALIDITY 1]");
-                                            if (currentFolder.count() == 0) {
-                                                sendClient("* OK [UIDNEXT 1]");
-                                            } else {
-                                                sendClient("* OK [UIDNEXT " + currentFolder.getUidNext() + ']');
-                                            }
-                                            sendClient("* FLAGS (\\Answered \\Deleted \\Draft \\Flagged \\Seen $Forwarded Junk)");
-                                            sendClient("* OK [PERMANENTFLAGS (\\Answered \\Deleted \\Draft \\Flagged \\Seen $Forwarded Junk \\*)]");
-                                            if ("select".equalsIgnoreCase(command)) {
-                                                sendClient(commandId + " OK [READ-WRITE] " + command + " completed");
-                                            } else {
-                                                sendClient(commandId + " OK [READ-ONLY] " + command + " completed");
-                                            }
-                                        } catch (HttpNotFoundException e) {
-                                            sendClient(commandId + " NO Not found");
-                                        } catch (HttpForbiddenException e) {
-                                            sendClient(commandId + " NO Forbidden");
-                                        }
-                                    } else {
-                                        sendClient(commandId + " BAD command unrecognized");
-                                    }
+                                } else if ("select".equalsIgnoreCase(command) || "examine".equalsIgnoreCase(command)) {
+                                    handleSelect(tokens, commandId, command);
+
                                 } else if ("expunge".equalsIgnoreCase(command)) {
                                     if (expunge(false)) {
                                         // need to refresh folder to avoid 404 errors
@@ -294,125 +166,13 @@ public class ImapConnection extends AbstractConnection {
                                         sendClient(commandId + " NO " + e.getMessage());
                                     }
                                 } else if ("uid".equalsIgnoreCase(command)) {
-                                    if (tokens.hasMoreTokens()) {
-                                        String subcommand = tokens.nextToken();
-                                        if ("fetch".equalsIgnoreCase(subcommand)) {
-                                            if (currentFolder == null) {
-                                                sendClient(commandId + " NO no folder selected");
-                                            } else {
-                                                String ranges = tokens.nextToken();
-                                                if (ranges == null) {
-                                                    sendClient(commandId + " BAD missing range parameter");
-                                                } else {
-                                                    String parameters = null;
-                                                    if (tokens.hasMoreTokens()) {
-                                                        parameters = tokens.nextToken();
-                                                    }
-                                                    UIDRangeIterator uidRangeIterator = new UIDRangeIterator(currentFolder.messages, ranges);
-                                                    while (uidRangeIterator.hasNext()) {
-                                                        DavGatewayTray.switchIcon();
-                                                        ExchangeSession.Message message = uidRangeIterator.next();
-                                                        try {
-                                                            handleFetch(message, uidRangeIterator.currentIndex, parameters);
-                                                        } catch (HttpNotFoundException e) {
-                                                            LOGGER.warn("Ignore missing message " + uidRangeIterator.currentIndex);
-                                                        } catch (SocketException e) {
-                                                            // client closed connection
-                                                            throw e;
-                                                        } catch (IOException e) {
-                                                            DavGatewayTray.log(e);
-                                                            sendClient(commandId + " NO Unable to retrieve message: " + e.getMessage());
-                                                        }
-                                                    }
-                                                    sendClient(commandId + " OK UID FETCH completed");
-                                                }
-                                            }
+                                    handleUid(tokens, commandId, command);
 
-                                        } else if ("search".equalsIgnoreCase(subcommand)) {
-                                            List<Long> uidList = handleSearch(tokens);
-                                            StringBuilder buffer = new StringBuilder("* SEARCH");
-                                            for (long uid : uidList) {
-                                                buffer.append(' ');
-                                                buffer.append(uid);
-                                            }
-                                            sendClient(buffer.toString());
-                                            sendClient(commandId + " OK SEARCH completed");
-
-                                        } else if ("store".equalsIgnoreCase(subcommand)) {
-                                            UIDRangeIterator uidRangeIterator = new UIDRangeIterator(currentFolder.messages, tokens.nextToken());
-                                            String action = tokens.nextToken();
-                                            String flags = tokens.nextToken();
-                                            handleStore(commandId, uidRangeIterator, action, flags);
-                                        } else if ("copy".equalsIgnoreCase(subcommand) || "move".equalsIgnoreCase(subcommand)) {
-                                            try {
-                                                UIDRangeIterator uidRangeIterator = new UIDRangeIterator(currentFolder.messages, tokens.nextToken());
-                                                String targetName = BASE64MailboxDecoder.decode(tokens.nextToken());
-                                                if (!uidRangeIterator.hasNext()) {
-                                                    sendClient(commandId + " NO " + "No message found");
-                                                } else {
-                                                    while (uidRangeIterator.hasNext()) {
-                                                        DavGatewayTray.switchIcon();
-                                                        ExchangeSession.Message message = uidRangeIterator.next();
-                                                        if ("copy".equalsIgnoreCase(subcommand)) {
-                                                            session.copyMessage(message, targetName);
-                                                        } else {
-                                                            session.moveMessage(message, targetName);
-                                                        }
-                                                    }
-                                                    sendClient(commandId + " OK " + subcommand + " completed");
-                                                }
-                                            } catch (HttpException e) {
-                                                sendClient(commandId + " NO " + e.getMessage());
-                                            }
-                                        }
-                                    } else {
-                                        sendClient(commandId + " BAD command unrecognized");
-                                    }
                                 } else if ("search".equalsIgnoreCase(command)) {
-                                    if (currentFolder == null) {
-                                        sendClient(commandId + " NO no folder selected");
-                                    } else {
-                                        List<Long> uidList = handleSearch(tokens);
-                                        if (uidList.isEmpty()) {
-                                            sendClient("* SEARCH");
-                                        } else {
-                                            int currentIndex = 0;
-                                            for (ExchangeSession.Message message : currentFolder.messages) {
-                                                currentIndex++;
-                                                if (uidList.contains(message.getImapUid())) {
-                                                    sendClient("* SEARCH " + currentIndex);
-                                                }
-                                            }
-                                        }
-                                        sendClient(commandId + " OK SEARCH completed");
-                                    }
-                                } else if ("fetch".equalsIgnoreCase(command)) {
-                                    if (currentFolder == null) {
-                                        sendClient(commandId + " NO no folder selected");
-                                    } else {
-                                        RangeIterator rangeIterator = new RangeIterator(currentFolder.messages, tokens.nextToken());
-                                        String parameters = null;
-                                        if (tokens.hasMoreTokens()) {
-                                            parameters = tokens.nextToken();
-                                        }
-                                        while (rangeIterator.hasNext()) {
-                                            DavGatewayTray.switchIcon();
-                                            ExchangeSession.Message message = rangeIterator.next();
-                                            try {
-                                                handleFetch(message, rangeIterator.currentIndex, parameters);
-                                            } catch (HttpNotFoundException e) {
-                                                LOGGER.warn("Ignore missing message " + rangeIterator.currentIndex);
-                                            } catch (SocketException e) {
-                                                // client closed connection, rethrow exception
-                                                throw e;
-                                            } catch (IOException e) {
-                                                DavGatewayTray.log(e);
-                                                sendClient(commandId + " NO Unable to retrieve message: " + e.getMessage());
-                                            }
+                                    handleSearch(tokens, commandId, command);
 
-                                        }
-                                        sendClient(commandId + " OK FETCH completed");
-                                    }
+                                } else if ("fetch".equalsIgnoreCase(command)) {
+                                    handleFetch(tokens, commandId, command);
 
                                 } else if ("store".equalsIgnoreCase(command)) {
                                     RangeIterator rangeIterator = new RangeIterator(currentFolder.messages, tokens.nextToken());
@@ -421,139 +181,14 @@ public class ImapConnection extends AbstractConnection {
                                     handleStore(commandId, rangeIterator, action, flags);
 
                                 } else if ("copy".equalsIgnoreCase(command) || "move".equalsIgnoreCase(command)) {
-                                    try {
-                                        RangeIterator rangeIterator = new RangeIterator(currentFolder.messages, tokens.nextToken());
-                                        String targetName = BASE64MailboxDecoder.decode(tokens.nextToken());
-                                        if (!rangeIterator.hasNext()) {
-                                            sendClient(commandId + " NO " + "No message found");
-                                        } else {
-                                            while (rangeIterator.hasNext()) {
-                                                DavGatewayTray.switchIcon();
-                                                ExchangeSession.Message message = rangeIterator.next();
-                                                if ("copy".equalsIgnoreCase(command)) {
-                                                    session.copyMessage(message, targetName);
-                                                } else {
-                                                    session.moveMessage(message, targetName);
-                                                }
-                                            }
-                                            sendClient(commandId + " OK " + command + " completed");
-                                        }
-                                    } catch (HttpException e) {
-                                        sendClient(commandId + " NO " + e.getMessage());
-                                    }
+                                    handleCopyOrMove(tokens, commandId, command);
+
                                 } else if ("append".equalsIgnoreCase(command)) {
-                                    String folderName = BASE64MailboxDecoder.decode(tokens.nextToken());
-                                    HashMap<String, String> properties = new HashMap<String, String>();
-                                    String flags = null;
-                                    String date = null;
-                                    // handle optional flags
-                                    String nextToken = tokens.nextQuotedToken();
-                                    if (nextToken.startsWith("(")) {
-                                        flags = StringUtil.removeQuotes(nextToken);
-                                        if (tokens.hasMoreTokens()) {
-                                            nextToken = tokens.nextToken();
-                                            if (tokens.hasMoreTokens()) {
-                                                date = nextToken;
-                                                nextToken = tokens.nextToken();
-                                            }
-                                        }
-                                    } else if (tokens.hasMoreTokens()) {
-                                        date = StringUtil.removeQuotes(nextToken);
-                                        nextToken = tokens.nextToken();
-                                    }
+                                    handleAppend(tokens, commandId, command);
 
-                                    if (flags != null) {
-                                        // parse flags, on create read and draft flags are on the
-                                        // same messageFlags property, 8 means draft and 1 means read
-                                        StringTokenizer flagtokenizer = new StringTokenizer(flags);
-                                        while (flagtokenizer.hasMoreTokens()) {
-                                            String flag = flagtokenizer.nextToken();
-                                            if ("\\Seen".equalsIgnoreCase(flag)) {
-                                                if (properties.containsKey("draft")) {
-                                                    // draft message, add read flag
-                                                    properties.put("draft", "9");
-                                                } else {
-                                                    // not (yet) draft, set read flag
-                                                    properties.put("draft", "1");
-                                                }
-                                            } else if ("\\Flagged".equalsIgnoreCase(flag)) {
-                                                properties.put("flagged", "2");
-                                            } else if ("\\Answered".equalsIgnoreCase(flag)) {
-                                                properties.put("answered", "102");
-                                            } else if ("$Forwarded".equalsIgnoreCase(flag)) {
-                                                properties.put("forwarded", "104");
-                                            } else if ("\\Draft".equalsIgnoreCase(flag)) {
-                                                if (properties.containsKey("draft")) {
-                                                    // read message, add draft flag
-                                                    properties.put("draft", "9");
-                                                } else {
-                                                    // not (yet) read, set draft flag
-                                                    properties.put("draft", "8");
-                                                }
-                                            } else if ("Junk".equalsIgnoreCase(flag)) {
-                                                properties.put("junk", "1");
-                                            }
-                                        }
-                                    } else {
-                                        // no flags, force not draft and unread
-                                        properties.put("draft", "0");
-                                    }
-                                    // handle optional date
-                                    if (date != null) {
-                                        SimpleDateFormat dateParser = new SimpleDateFormat("dd-MMM-yyyy HH:mm:ss Z", Locale.ENGLISH);
-                                        Date dateReceived = dateParser.parse(date);
-                                        SimpleDateFormat dateFormatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
-                                        dateFormatter.setTimeZone(ExchangeSession.GMT_TIMEZONE);
-
-                                        properties.put("datereceived", dateFormatter.format(dateReceived));
-                                    }
-                                    int size = Integer.parseInt(StringUtil.removeQuotes(nextToken));
-                                    sendClient("+ send literal data");
-                                    byte[] buffer = in.readContent(size);
-                                    // empty line
-                                    readClient();
-                                    MimeMessage mimeMessage = new MimeMessage(null, new SharedByteArrayInputStream(buffer));
-
-                                    String messageName = UUID.randomUUID().toString() + ".EML";
-                                    try {
-                                        MessageCreateThread.createMessage(session, folderName, messageName, properties, mimeMessage, os, capabilities);
-                                        sendClient(commandId + " OK APPEND completed");
-                                    } catch (InsufficientStorageException e) {
-                                        sendClient(commandId + " NO " + e.getMessage());
-                                    }
                                 } else if ("idle".equalsIgnoreCase(command) && imapIdleDelay > 0) {
-                                    if (currentFolder != null) {
-                                        sendClient("+ idling ");
-                                        // clear cache before going to idle mode
-                                        currentFolder.clearCache();
-                                        DavGatewayTray.resetIcon();
-                                        try {
-                                            int count = 0;
-                                            while (in.available() == 0) {
-                                                if (++count >= imapIdleDelay) {
-                                                    count = 0;
-                                                    TreeMap<Long, String> previousImapFlagMap = currentFolder.getImapFlagMap();
-                                                    if (session.refreshFolder(currentFolder)) {
-                                                        handleRefresh(previousImapFlagMap, currentFolder.getImapFlagMap());
-                                                    }
-                                                }
-                                                // sleep 1 second
-                                                Thread.sleep(1000);
-                                            }
-                                            // read DONE line
-                                            line = readClient();
-                                            if ("DONE".equals(line)) {
-                                                sendClient(commandId + " OK " + command + " terminated");
-                                            } else {
-                                                sendClient(commandId + " BAD command unrecognized");
-                                            }
-                                        } catch (IOException e) {
-                                            // client connection closed
-                                            throw new SocketException(e.getMessage());
-                                        }
-                                    } else {
-                                        sendClient(commandId + " NO no folder selected");
-                                    }
+                                    handleIdle(commandId, command);
+
                                 } else if ("noop".equalsIgnoreCase(command) || "check".equalsIgnoreCase(command)) {
                                     if (currentFolder != null) {
                                         DavGatewayTray.debug(new BundleMessage("LOG_IMAP_COMMAND", command, currentFolder.folderPath));
@@ -565,48 +200,9 @@ public class ImapConnection extends AbstractConnection {
                                     sendClient(commandId + " OK " + command + " completed");
                                 } else if ("subscribe".equalsIgnoreCase(command) || "unsubscribe".equalsIgnoreCase(command)) {
                                     sendClient(commandId + " OK " + command + " completed");
+                                    // TODO Currently subscribe is a NOOP
                                 } else if ("status".equalsIgnoreCase(command)) {
-                                    try {
-                                        String encodedFolderName = tokens.nextToken();
-                                        String folderName = BASE64MailboxDecoder.decode(encodedFolderName);
-                                        ExchangeSession.Folder folder = session.getFolder(folderName);
-                                        // must retrieve messages
-                                        folder.loadMessages();
-                                        String parameters = tokens.nextToken();
-                                        StringBuilder answer = new StringBuilder();
-                                        StringTokenizer parametersTokens = new StringTokenizer(parameters);
-                                        while (parametersTokens.hasMoreTokens()) {
-                                            String token = parametersTokens.nextToken();
-                                            if ("MESSAGES".equalsIgnoreCase(token)) {
-                                                answer.append("MESSAGES ").append(folder.count()).append(' ');
-                                            }
-                                            if ("RECENT".equalsIgnoreCase(token)) {
-                                                answer.append("RECENT ").append(folder.recent).append(' ');
-                                            }
-                                            if ("UIDNEXT".equalsIgnoreCase(token)) {
-                                                if (folder.count() == 0) {
-                                                    answer.append("UIDNEXT 1 ");
-                                                } else {
-                                                    if (folder.count() == 0) {
-                                                        answer.append("UIDNEXT 1 ");
-                                                    } else {
-                                                        answer.append("UIDNEXT ").append(folder.getUidNext()).append(' ');
-                                                    }
-                                                }
-
-                                            }
-                                            if ("UIDVALIDITY".equalsIgnoreCase(token)) {
-                                                answer.append("UIDVALIDITY 1 ");
-                                            }
-                                            if ("UNSEEN".equalsIgnoreCase(token)) {
-                                                answer.append("UNSEEN ").append(folder.unreadCount).append(' ');
-                                            }
-                                        }
-                                        sendClient("* STATUS \"" + encodedFolderName + "\" (" + answer.toString().trim() + ')');
-                                        sendClient(commandId + " OK " + command + " completed");
-                                    } catch (HttpException e) {
-                                        sendClient(commandId + " NO folder not found");
-                                    }
+                                    handleStatus(tokens, commandId, command);
                                 } else {
                                     sendClient(commandId + " BAD command unrecognized");
                                 }
@@ -648,6 +244,470 @@ public class ImapConnection extends AbstractConnection {
             close();
         }
         DavGatewayTray.resetIcon();
+    }
+
+    protected void handleLogin(IMAPTokenizer tokens, final String commandId, final String command) throws IOException {
+        parseCredentials(tokens);
+        // detect shared mailbox access
+        splitUserName();
+        try {
+            session = ExchangeSessionFactory.getInstance(userName, password);
+            sendClient(commandId + " OK Authenticated");
+            state = State.AUTHENTICATED;
+        } catch (Exception e) {
+            DavGatewayTray.error(e);
+            if (Settings.getBooleanProperty("davmail.enableKerberos")) {
+                sendClient(commandId + " NO LOGIN Kerberos authentication failed");
+            } else {
+                sendClient(commandId + " NO LOGIN failed");
+            }
+            state = State.INITIAL;
+        }
+    }
+
+    protected void handleAuth(IMAPTokenizer tokens, final String commandId, final String command) throws IOException {
+        if (tokens.hasMoreTokens()) {
+            String authenticationMethod = tokens.nextToken();
+            if ("LOGIN".equalsIgnoreCase(authenticationMethod)) {
+                try {
+                    sendClient("+ " + base64Encode("Username:"));
+                    state = State.LOGIN;
+                    userName = base64Decode(readClient());
+                    // detect shared mailbox access
+                    splitUserName();
+                    sendClient("+ " + base64Encode("Password:"));
+                    state = State.PASSWORD;
+                    password = base64Decode(readClient());
+                    session = ExchangeSessionFactory.getInstance(userName, password);
+                    sendClient(commandId + " OK Authenticated");
+                    state = State.AUTHENTICATED;
+                } catch (Exception e) {
+                    DavGatewayTray.error(e);
+                    sendClient(commandId + " NO LOGIN failed");
+                    state = State.INITIAL;
+                }
+            } else {
+                sendClient(commandId + " NO unsupported authentication method");
+            }
+        } else {
+            sendClient(commandId + " BAD authentication method required");
+        }
+    }
+
+    protected void handleList(IMAPTokenizer tokens, final String commandId, final String command) throws IOException {
+        if (tokens.hasMoreTokens()) {
+            String folderContext;
+            if (baseMailboxPath == null) {
+                folderContext = BASE64MailboxDecoder.decode(tokens.nextToken());
+            } else {
+                folderContext = baseMailboxPath + BASE64MailboxDecoder.decode(tokens.nextToken());
+            }
+            if (tokens.hasMoreTokens()) {
+                String folderQuery = folderContext + BASE64MailboxDecoder.decode(tokens.nextToken());
+                if (folderQuery.endsWith("%/%") && !"/%/%".equals(folderQuery)) {
+                    List<ExchangeSession.Folder> folders = session.getSubFolders(folderQuery.substring(0, folderQuery.length() - 3), false);
+                    for (ExchangeSession.Folder folder : folders) {
+                        sendClient("* " + command + " (" + folder.getFlags() + ") \"/\" \"" + BASE64MailboxEncoder.encode(folder.folderPath) + '\"');
+                        sendSubFolders(command, folder.folderPath, false);
+                    }
+                    sendClient(commandId + " OK " + command + " completed");
+                } else if (folderQuery.endsWith("%") || folderQuery.endsWith("*")) {
+                    if ("/*".equals(folderQuery) || "/%".equals(folderQuery) || "/%/%".equals(folderQuery)) {
+                        folderQuery = folderQuery.substring(1);
+                        if ("%/%".equals(folderQuery)) {
+                            folderQuery = folderQuery.substring(0, folderQuery.length() - 2);
+                        }
+                        sendClient("* " + command + " (\\HasChildren) \"/\" \"/public\"");
+                    }
+                    if ("*%".equals(folderQuery)) {
+                        folderQuery = "*";
+                    }
+                    boolean recursive = folderQuery.endsWith("*") && !folderQuery.startsWith("/public");
+                    sendSubFolders(command, folderQuery.substring(0, folderQuery.length() - 1), recursive);
+                    sendClient(commandId + " OK " + command + " completed");
+                } else {
+                    ExchangeSession.Folder folder = null;
+                    try {
+                        folder = session.getFolder(folderQuery);
+                    } catch (HttpForbiddenException e) {
+                        // access forbidden, ignore
+                        DavGatewayTray.debug(new BundleMessage("LOG_FOLDER_ACCESS_FORBIDDEN", folderQuery));
+                    } catch (HttpNotFoundException e) {
+                        // not found, ignore
+                        DavGatewayTray.debug(new BundleMessage("LOG_FOLDER_NOT_FOUND", folderQuery));
+                    } catch (HttpException e) {
+                        // other errors, ignore
+                        DavGatewayTray.debug(new BundleMessage("LOG_FOLDER_ACCESS_ERROR", folderQuery, e.getMessage()));
+                    }
+                    if (folder != null) {
+                        sendClient("* " + command + " (" + folder.getFlags() + ") \"/\" \"" + BASE64MailboxEncoder.encode(folder.folderPath) + '\"');
+                        sendClient(commandId + " OK " + command + " completed");
+                    } else {
+                        sendClient(commandId + " NO Folder not found");
+                    }
+                }
+            } else {
+                sendClient(commandId + " BAD missing folder argument");
+            }
+        } else {
+            sendClient(commandId + " BAD missing folder argument");
+        }
+    }
+
+    protected void handleSelect(IMAPTokenizer tokens, final String commandId, final String command) throws IOException, InterruptedException {
+        if (tokens.hasMoreTokens()) {
+            @SuppressWarnings({"NonConstantStringShouldBeStringBuffer"})
+            String folderName = BASE64MailboxDecoder.decode(tokens.nextToken());
+            if (baseMailboxPath != null && !folderName.startsWith("/")) {
+                folderName = baseMailboxPath + folderName;
+            }
+            try {
+                currentFolder = session.getFolder(folderName);
+                if (currentFolder.count() <= 500) {
+                    // simple folder load
+                    currentFolder.loadMessages();
+                    sendClient("* " + currentFolder.count() + " EXISTS");
+                } else {
+                    // load folder in a separate thread
+                    LOGGER.debug("*");
+                    os.write('*');
+                    FolderLoadThread.loadFolder(currentFolder, os);
+                    sendClient(" " + currentFolder.count() + " EXISTS");
+                }
+
+                sendClient("* " + currentFolder.recent + " RECENT");
+                sendClient("* OK [UIDVALIDITY 1]");
+                if (currentFolder.count() == 0) {
+                    sendClient("* OK [UIDNEXT 1]");
+                } else {
+                    sendClient("* OK [UIDNEXT " + currentFolder.getUidNext() + ']');
+                }
+                sendClient("* FLAGS (\\Answered \\Deleted \\Draft \\Flagged \\Seen $Forwarded Junk)");
+                sendClient("* OK [PERMANENTFLAGS (\\Answered \\Deleted \\Draft \\Flagged \\Seen $Forwarded Junk \\*)]");
+                if ("select".equalsIgnoreCase(command)) {
+                    sendClient(commandId + " OK [READ-WRITE] " + command + " completed");
+                } else {
+                    sendClient(commandId + " OK [READ-ONLY] " + command + " completed");
+                }
+            } catch (HttpNotFoundException e) {
+                sendClient(commandId + " NO Not found");
+            } catch (HttpForbiddenException e) {
+                sendClient(commandId + " NO Forbidden");
+            }
+        } else {
+            sendClient(commandId + " BAD command unrecognized");
+        }
+    }
+
+    protected void handleUid(IMAPTokenizer tokens, final String commandId, final String command) throws IOException, MessagingException {
+        if (tokens.hasMoreTokens()) {
+            String subcommand = tokens.nextToken();
+            if ("fetch".equalsIgnoreCase(subcommand)) {
+                if (currentFolder == null) {
+                    sendClient(commandId + " NO no folder selected");
+                } else {
+                    String ranges = tokens.nextToken();
+                    if (ranges == null) {
+                        sendClient(commandId + " BAD missing range parameter");
+                    } else {
+                        String parameters = null;
+                        if (tokens.hasMoreTokens()) {
+                            parameters = tokens.nextToken();
+                        }
+                        UIDRangeIterator uidRangeIterator = new UIDRangeIterator(currentFolder.messages, ranges);
+                        while (uidRangeIterator.hasNext()) {
+                            DavGatewayTray.switchIcon();
+                            ExchangeSession.Message message = uidRangeIterator.next();
+                            try {
+                                handleFetchOne(message, uidRangeIterator.currentIndex, parameters);
+                            } catch (HttpNotFoundException e) {
+                                LOGGER.warn("Ignore missing message " + uidRangeIterator.currentIndex);
+                            } catch (SocketException e) {
+                                // client closed connection
+                                throw e;
+                            } catch (IOException e) {
+                                DavGatewayTray.log(e);
+                                sendClient(commandId + " NO Unable to retrieve message: " + e.getMessage());
+                            }
+                        }
+                        sendClient(commandId + " OK UID FETCH completed");
+                    }
+                }
+
+            } else if ("search".equalsIgnoreCase(subcommand)) {
+                List<Long> uidList = handleSearch(tokens);
+                StringBuilder buffer = new StringBuilder("* SEARCH");
+                for (long uid : uidList) {
+                    buffer.append(' ');
+                    buffer.append(uid);
+                }
+                sendClient(buffer.toString());
+                sendClient(commandId + " OK SEARCH completed");
+
+            } else if ("store".equalsIgnoreCase(subcommand)) {
+                UIDRangeIterator uidRangeIterator = new UIDRangeIterator(currentFolder.messages, tokens.nextToken());
+                String action = tokens.nextToken();
+                String flags = tokens.nextToken();
+                handleStore(commandId, uidRangeIterator, action, flags);
+            } else if ("copy".equalsIgnoreCase(subcommand) || "move".equalsIgnoreCase(subcommand)) {
+                try {
+                    UIDRangeIterator uidRangeIterator = new UIDRangeIterator(currentFolder.messages, tokens.nextToken());
+                    String targetName = BASE64MailboxDecoder.decode(tokens.nextToken());
+                    if (!uidRangeIterator.hasNext()) {
+                        sendClient(commandId + " NO " + "No message found");
+                    } else {
+                        while (uidRangeIterator.hasNext()) {
+                            DavGatewayTray.switchIcon();
+                            ExchangeSession.Message message = uidRangeIterator.next();
+                            if ("copy".equalsIgnoreCase(subcommand)) {
+                                session.copyMessage(message, targetName);
+                            } else {
+                                session.moveMessage(message, targetName);
+                            }
+                        }
+                        sendClient(commandId + " OK " + subcommand + " completed");
+                    }
+                } catch (HttpException e) {
+                    sendClient(commandId + " NO " + e.getMessage());
+                }
+            }
+        } else {
+            sendClient(commandId + " BAD command unrecognized");
+        }
+    }
+
+    protected void handleSearch(IMAPTokenizer tokens, final String commandId, final String command) throws IOException {
+        if (currentFolder == null) {
+            sendClient(commandId + " NO no folder selected");
+        } else {
+            List<Long> uidList = handleSearch(tokens);
+            if (uidList.isEmpty()) {
+                sendClient("* SEARCH");
+            } else {
+                int currentIndex = 0;
+                for (ExchangeSession.Message message : currentFolder.messages) {
+                    currentIndex++;
+                    if (uidList.contains(message.getImapUid())) {
+                        sendClient("* SEARCH " + currentIndex);
+                    }
+                }
+            }
+            sendClient(commandId + " OK SEARCH completed");
+        }
+    }
+
+    protected void handleFetch(IMAPTokenizer tokens, final String commandId, final String command) throws IOException, MessagingException {
+        if (currentFolder == null) {
+            sendClient(commandId + " NO no folder selected");
+        } else {
+            RangeIterator rangeIterator = new RangeIterator(currentFolder.messages, tokens.nextToken());
+            String parameters = null;
+            if (tokens.hasMoreTokens()) {
+                parameters = tokens.nextToken();
+            }
+            while (rangeIterator.hasNext()) {
+                DavGatewayTray.switchIcon();
+                ExchangeSession.Message message = rangeIterator.next();
+                try {
+                    handleFetchOne(message, rangeIterator.currentIndex, parameters);
+                } catch (HttpNotFoundException e) {
+                    LOGGER.warn("Ignore missing message " + rangeIterator.currentIndex);
+                } catch (SocketException e) {
+                    // client closed connection, rethrow exception
+                    throw e;
+                } catch (IOException e) {
+                    DavGatewayTray.log(e);
+                    sendClient(commandId + " NO Unable to retrieve message: " + e.getMessage());
+                }
+            }
+            sendClient(commandId + " OK FETCH completed");
+        }
+    }
+
+    protected void handleCopyOrMove(IMAPTokenizer tokens, final String commandId, final String command) throws IOException {
+        try {
+            RangeIterator rangeIterator = new RangeIterator(currentFolder.messages, tokens.nextToken());
+            String targetName = BASE64MailboxDecoder.decode(tokens.nextToken());
+            if (!rangeIterator.hasNext()) {
+                sendClient(commandId + " NO " + "No message found");
+            } else {
+                while (rangeIterator.hasNext()) {
+                    DavGatewayTray.switchIcon();
+                    ExchangeSession.Message message = rangeIterator.next();
+                    if ("copy".equalsIgnoreCase(command)) {
+                        session.copyMessage(message, targetName);
+                    } else {
+                        session.moveMessage(message, targetName);
+                    }
+                }
+                sendClient(commandId + " OK " + command + " completed");
+            }
+        } catch (HttpException e) {
+            sendClient(commandId + " NO " + e.getMessage());
+        }
+    }
+
+    protected void handleAppend(IMAPTokenizer tokens, final String commandId, final String command) throws IOException, MessagingException, ParseException, InterruptedException {
+
+        String folderName = BASE64MailboxDecoder.decode(tokens.nextToken());
+        HashMap<String, String> properties = new HashMap<String, String>();
+        String flags = null;
+        String date = null;
+        // handle optional flags
+        String nextToken = tokens.nextQuotedToken();
+        if (nextToken.startsWith("(")) {
+            flags = StringUtil.removeQuotes(nextToken);
+            if (tokens.hasMoreTokens()) {
+                nextToken = tokens.nextToken();
+                if (tokens.hasMoreTokens()) {
+                    date = nextToken;
+                    nextToken = tokens.nextToken();
+                }
+            }
+        } else if (tokens.hasMoreTokens()) {
+            date = StringUtil.removeQuotes(nextToken);
+            nextToken = tokens.nextToken();
+        }
+
+        if (flags != null) {
+            // parse flags, on create read and draft flags are on the
+            // same messageFlags property, 8 means draft and 1 means read
+            StringTokenizer flagtokenizer = new StringTokenizer(flags);
+            while (flagtokenizer.hasMoreTokens()) {
+                String flag = flagtokenizer.nextToken();
+                if ("\\Seen".equalsIgnoreCase(flag)) {
+                    if (properties.containsKey("draft")) {
+                        // draft message, add read flag
+                        properties.put("draft", "9");
+                    } else {
+                        // not (yet) draft, set read flag
+                        properties.put("draft", "1");
+                    }
+                } else if ("\\Flagged".equalsIgnoreCase(flag)) {
+                    properties.put("flagged", "2");
+                } else if ("\\Answered".equalsIgnoreCase(flag)) {
+                    properties.put("answered", "102");
+                } else if ("$Forwarded".equalsIgnoreCase(flag)) {
+                    properties.put("forwarded", "104");
+                } else if ("\\Draft".equalsIgnoreCase(flag)) {
+                    if (properties.containsKey("draft")) {
+                        // read message, add draft flag
+                        properties.put("draft", "9");
+                    } else {
+                        // not (yet) read, set draft flag
+                        properties.put("draft", "8");
+                    }
+                } else if ("Junk".equalsIgnoreCase(flag)) {
+                    properties.put("junk", "1");
+                }
+            }
+        } else {
+            // no flags, force not draft and unread
+            properties.put("draft", "0");
+        }
+        // handle optional date
+        if (date != null) {
+            SimpleDateFormat dateParser = new SimpleDateFormat("dd-MMM-yyyy HH:mm:ss Z", Locale.ENGLISH);
+            Date dateReceived = dateParser.parse(date);
+            SimpleDateFormat dateFormatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+            dateFormatter.setTimeZone(ExchangeSession.GMT_TIMEZONE);
+
+            properties.put("datereceived", dateFormatter.format(dateReceived));
+        }
+        int size = Integer.parseInt(StringUtil.removeQuotes(nextToken));
+        sendClient("+ send literal data");
+        byte[] buffer = in.readContent(size);
+        // empty line
+        readClient();
+        MimeMessage mimeMessage = new MimeMessage(null, new SharedByteArrayInputStream(buffer));
+
+        String messageName = UUID.randomUUID().toString() + ".EML";
+        try {
+            MessageCreateThread.createMessage(session, folderName, messageName, properties, mimeMessage, os, capabilities);
+            sendClient(commandId + " OK APPEND completed");
+        } catch (InsufficientStorageException e) {
+            sendClient(commandId + " NO " + e.getMessage());
+        }
+    }
+
+    protected void handleIdle(final String commandId, final String command) throws InterruptedException, IOException {
+        if (currentFolder != null) {
+            sendClient("+ idling ");
+            // clear cache before going to idle mode
+            currentFolder.clearCache();
+            DavGatewayTray.resetIcon();
+            try {
+                int count = 0;
+                while (in.available() == 0) {
+                    if (++count >= imapIdleDelay) {
+                        count = 0;
+                        TreeMap<Long, String> previousImapFlagMap = currentFolder.getImapFlagMap();
+                        if (session.refreshFolder(currentFolder)) {
+                            handleRefresh(previousImapFlagMap, currentFolder.getImapFlagMap());
+                        }
+                    }
+                    // sleep 1 second
+                    Thread.sleep(1000);
+                }
+                // read DONE line
+                String line = readClient();
+                if ("DONE".equals(line)) {
+                    sendClient(commandId + " OK " + command + " terminated");
+                } else {
+                    sendClient(commandId + " BAD command unrecognized");
+                }
+            } catch (IOException e) {
+                // client connection closed
+                throw new SocketException(e.getMessage());
+            }
+        } else {
+            sendClient(commandId + " NO no folder selected");
+        }
+    }
+
+    protected void handleStatus(IMAPTokenizer tokens, String commandId, String command) throws IOException {
+        try {
+            String encodedFolderName = tokens.nextToken();
+            String folderName = BASE64MailboxDecoder.decode(encodedFolderName);
+            ExchangeSession.Folder folder = session.getFolder(folderName);
+            // must retrieve messages
+            folder.loadMessages();
+            String parameters = tokens.nextToken();
+            StringBuilder answer = new StringBuilder();
+            StringTokenizer parametersTokens = new StringTokenizer(parameters);
+            while (parametersTokens.hasMoreTokens()) {
+                String token = parametersTokens.nextToken();
+                if ("MESSAGES".equalsIgnoreCase(token)) {
+                    answer.append("MESSAGES ").append(folder.count()).append(' ');
+                }
+                if ("RECENT".equalsIgnoreCase(token)) {
+                    answer.append("RECENT ").append(folder.recent).append(' ');
+                }
+                if ("UIDNEXT".equalsIgnoreCase(token)) {
+                    if (folder.count() == 0) {
+                        answer.append("UIDNEXT 1 ");
+                    } else {
+                        if (folder.count() == 0) {
+                            answer.append("UIDNEXT 1 ");
+                        } else {
+                            answer.append("UIDNEXT ").append(folder.getUidNext()).append(' ');
+                        }
+                    }
+
+                }
+                if ("UIDVALIDITY".equalsIgnoreCase(token)) {
+                    answer.append("UIDVALIDITY 1 ");
+                }
+                if ("UNSEEN".equalsIgnoreCase(token)) {
+                    answer.append("UNSEEN ").append(folder.unreadCount).append(' ');
+                }
+            }
+            sendClient("* STATUS \"" + encodedFolderName + "\" (" + answer.toString().trim() + ')');
+            sendClient(commandId + " OK " + command + " completed");
+        } catch (HttpException e) {
+            sendClient(commandId + " NO folder not found");
+        }
+
     }
 
     protected String lastCommand;
@@ -782,7 +842,7 @@ public class ImapConnection extends AbstractConnection {
     }
 
 
-    private void handleFetch(ExchangeSession.Message message, int currentIndex, String parameters) throws IOException, MessagingException {
+    private void handleFetchOne(ExchangeSession.Message message, int currentIndex, String parameters) throws IOException, MessagingException {
         StringBuilder buffer = new StringBuilder();
         MessageWrapper messageWrapper = new MessageWrapper(os, buffer, message);
         buffer.append("* ").append(currentIndex).append(" FETCH (UID ").append(message.getImapUid());
@@ -1028,6 +1088,7 @@ public class ImapConnection extends AbstractConnection {
         } else {
             iterator = localMessages.iterator();
         }
+        // TODO Below is perfect usecase for Guava Filter
         while (iterator.hasNext()) {
             ExchangeSession.Message message = iterator.next();
             if ((conditions.flagged == null || message.flagged == conditions.flagged)

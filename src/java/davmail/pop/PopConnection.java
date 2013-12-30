@@ -108,45 +108,12 @@ public class PopConnection extends AbstractConnection {
                     String command = tokens.nextToken();
 
                     if ("QUIT".equalsIgnoreCase(command)) {
-                        // delete messages before quit
-                        if (session != null) {
-                            session.purgeOldestTrashAndSentMessages();
-                        }
-                        sendOK("Bye");
+                        handleQuit();
                         break;
                     } else if ("USER".equalsIgnoreCase(command)) {
-                        userName = null;
-                        password = null;
-                        session = null;
-                        if (tokens.hasMoreTokens()) {
-                            userName = line.substring("USER ".length());
-                            sendOK("USER : " + userName);
-                            state = State.USER;
-                        } else {
-                            sendERR("invalid syntax");
-                            state = State.INITIAL;
-                        }
+                        handleUser(tokens, line);
                     } else if ("PASS".equalsIgnoreCase(command)) {
-                        if (state != State.USER) {
-                            sendERR("invalid state");
-                            state = State.INITIAL;
-                        } else if (!tokens.hasMoreTokens()) {
-                            sendERR("invalid syntax");
-                        } else {
-                            // bug 2194492 : allow space in password
-                            password = line.substring("PASS".length() + 1);
-                            try {
-                                session = ExchangeSessionFactory.getInstance(userName, password);
-                                sendOK("PASS");
-                                state = State.AUTHENTICATED;
-                            } catch (SocketException e) {
-                                // can not send error to client after a socket exception
-                                LOGGER.warn(BundleMessage.formatLog("LOG_CLIENT_CLOSED_CONNECTION"));
-                            } catch (Exception e) {
-                                DavGatewayTray.error(e);
-                                sendERR(e);
-                            }
-                        }
+                        handlePass(tokens, line);
                     } else if ("CAPA".equalsIgnoreCase(command)) {
                         sendOK("Capability list follows");
                         printCapabilities();
@@ -158,108 +125,21 @@ public class PopConnection extends AbstractConnection {
                             messages = session.getAllMessageUidAndSize("INBOX");
                         }
                         if ("STAT".equalsIgnoreCase(command)) {
-                            sendOK(messages.size() + " " +
-                                    getTotalMessagesLength());
+                            sendOK(messages.size() + " " + getTotalMessagesLength());
+
                         } else if ("NOOP".equalsIgnoreCase(command)) {
                             sendOK("");
+
                         } else if ("LIST".equalsIgnoreCase(command)) {
-                            if (tokens.hasMoreTokens()) {
-                                String token = tokens.nextToken();
-                                try {
-                                    int messageNumber = Integer.valueOf(token);
-                                    ExchangeSession.Message message = messages.get(messageNumber - 1);
-                                    sendOK("" + messageNumber + ' ' + message.size);
-                                } catch (NumberFormatException e) {
-                                    sendERR("Invalid message index: " + token);
-                                } catch (IndexOutOfBoundsException e) {
-                                    sendERR("Invalid message index: " + token);
-                                }
-                            } else {
-                                sendOK(messages.size() +
-                                        " messages (" + getTotalMessagesLength() +
-                                        " octets)");
-                                printList();
-                            }
+                            handleList(tokens);
                         } else if ("UIDL".equalsIgnoreCase(command)) {
-                            if (tokens.hasMoreTokens()) {
-                                String token = tokens.nextToken();
-                                try {
-                                    int messageNumber = Integer.valueOf(token);
-                                    sendOK(messageNumber + " " + messages.get(messageNumber - 1).getUid());
-                                } catch (NumberFormatException e) {
-                                    sendERR("Invalid message index: " + token);
-                                } catch (IndexOutOfBoundsException e) {
-                                    sendERR("Invalid message index: " + token);
-                                }
-                            } else {
-                                sendOK(messages.size() +
-                                        " messages (" + getTotalMessagesLength() +
-                                        " octets)");
-                                printUidList();
-                            }
+                            handleUidl(tokens);
                         } else if ("RETR".equalsIgnoreCase(command)) {
-                            if (tokens.hasMoreTokens()) {
-                                try {
-                                    int messageNumber = Integer.valueOf(tokens.nextToken()) - 1;
-                                    ExchangeSession.Message message = messages.get(messageNumber);
-
-                                    // load big messages in a separate thread
-                                    os.write("+OK ".getBytes());
-                                    os.flush();
-                                    MessageLoadThread.loadMimeMessage(message, os);
-                                    sendClient("");
-
-                                    DoubleDotOutputStream doubleDotOutputStream = new DoubleDotOutputStream(os);
-                                    IOUtil.write(message.getRawInputStream(), doubleDotOutputStream);
-                                    doubleDotOutputStream.close();
-                                    if (Settings.getBooleanProperty("davmail.popMarkReadOnRetr")) {
-                                        message.markRead();
-                                    }
-                                } catch (SocketException e) {
-                                    // can not send error to client after a socket exception
-                                    LOGGER.warn(BundleMessage.formatLog("LOG_CLIENT_CLOSED_CONNECTION"));
-                                } catch (Exception e) {
-                                    DavGatewayTray.error(new BundleMessage("LOG_ERROR_RETRIEVING_MESSAGE"), e);
-                                    sendERR("error retrieving message " + e + ' ' + e.getMessage());
-                                }
-                            } else {
-                                sendERR("invalid message index");
-                            }
+                            handleRetreive(tokens);
                         } else if ("DELE".equalsIgnoreCase(command)) {
-                            if (tokens.hasMoreTokens()) {
-                                ExchangeSession.Message message;
-                                try {
-                                    int messageNumber = Integer.valueOf(tokens.
-                                            nextToken()) - 1;
-                                    message = messages.get(messageNumber);
-                                    message.moveToTrash();
-                                    sendOK("DELETE");
-                                } catch (NumberFormatException e) {
-                                    sendERR("invalid message index");
-                                } catch (IndexOutOfBoundsException e) {
-                                    sendERR("invalid message index");
-                                }
-                            } else {
-                                sendERR("invalid message index");
-                            }
+                            handleDelete(tokens);
                         } else if ("TOP".equalsIgnoreCase(command)) {
-                            int message = 0;
-                            try {
-                                message = Integer.valueOf(tokens.nextToken());
-                                int lines = Integer.valueOf(tokens.nextToken());
-                                ExchangeSession.Message m = messages.get(message - 1);
-                                sendOK("");
-                                DoubleDotOutputStream doubleDotOutputStream = new DoubleDotOutputStream(os);
-                                IOUtil.write(m.getRawInputStream(), new TopOutputStream(doubleDotOutputStream, lines));
-                                doubleDotOutputStream.close();
-                            } catch (NumberFormatException e) {
-                                sendERR("invalid command");
-                            } catch (IndexOutOfBoundsException e) {
-                                sendERR("invalid message index: " + message);
-                            } catch (Exception e) {
-                                sendERR("error retreiving top of messages");
-                                DavGatewayTray.error(e);
-                            }
+                            handleTop(tokens);
                         } else if ("RSET".equalsIgnoreCase(command)) {
                             sendOK("RSET");
                         } else {
@@ -286,6 +166,159 @@ public class PopConnection extends AbstractConnection {
             close();
         }
         DavGatewayTray.resetIcon();
+    }
+
+    protected void handleQuit() throws IOException {
+        // delete messages before quit
+        if (session != null) {
+            session.purgeOldestTrashAndSentMessages();
+        }
+        sendOK("Bye");
+    }
+
+    protected void handleUser(StringTokenizer tokens, String line) throws IOException {
+        userName = null;
+        password = null;
+        session = null;
+        if (tokens.hasMoreTokens()) {
+            userName = line.substring("USER ".length());
+            sendOK("USER : " + userName);
+            state = State.USER;
+        } else {
+            sendERR("invalid syntax");
+            state = State.INITIAL;
+        }
+    }
+
+    protected void handlePass(StringTokenizer tokens, String line) throws IOException {
+        if (state != State.USER) {
+            sendERR("invalid state");
+            state = State.INITIAL;
+        } else if (!tokens.hasMoreTokens()) {
+            sendERR("invalid syntax");
+        } else {
+            // bug 2194492 : allow space in password
+            password = line.substring("PASS".length() + 1);
+            try {
+                session = ExchangeSessionFactory.getInstance(userName, password);
+                sendOK("PASS");
+                state = State.AUTHENTICATED;
+            } catch (SocketException e) {
+                // can not send error to client after a socket exception
+                LOGGER.warn(BundleMessage.formatLog("LOG_CLIENT_CLOSED_CONNECTION"));
+            } catch (Exception e) {
+                DavGatewayTray.error(e);
+                sendERR(e);
+            }
+        }
+    }
+
+    protected void handleList(StringTokenizer tokens) throws IOException {
+        if (tokens.hasMoreTokens()) {
+            String token = tokens.nextToken();
+            try {
+                int messageNumber = Integer.valueOf(token);
+                ExchangeSession.Message message = messages.get(messageNumber - 1);
+                sendOK("" + messageNumber + ' ' + message.size);
+            } catch (NumberFormatException e) {
+                sendERR("Invalid message index: " + token);
+            } catch (IndexOutOfBoundsException e) {
+                sendERR("Invalid message index: " + token);
+            }
+        } else {
+            sendOK(messages.size() +
+                    " messages (" + getTotalMessagesLength() +
+                    " octets)");
+            printList();
+        }
+    }
+
+    protected void handleUidl(StringTokenizer tokens) throws IOException {
+        if (tokens.hasMoreTokens()) {
+            String token = tokens.nextToken();
+            try {
+                int messageNumber = Integer.valueOf(token);
+                sendOK(messageNumber + " " + messages.get(messageNumber - 1).getUid());
+            } catch (NumberFormatException e) {
+                sendERR("Invalid message index: " + token);
+            } catch (IndexOutOfBoundsException e) {
+                sendERR("Invalid message index: " + token);
+            }
+        } else {
+            sendOK(messages.size() +
+                    " messages (" + getTotalMessagesLength() +
+                    " octets)");
+            printUidList();
+        }
+    }
+
+    protected void handleRetreive(StringTokenizer tokens) throws IOException {
+        if (tokens.hasMoreTokens()) {
+            try {
+                int messageNumber = Integer.valueOf(tokens.nextToken()) - 1;
+                ExchangeSession.Message message = messages.get(messageNumber);
+
+                // load big messages in a separate thread
+                os.write("+OK ".getBytes());
+                os.flush();
+                MessageLoadThread.loadMimeMessage(message, os);
+                sendClient("");
+
+                DoubleDotOutputStream doubleDotOutputStream = new DoubleDotOutputStream(os);
+                IOUtil.write(message.getRawInputStream(), doubleDotOutputStream);
+                doubleDotOutputStream.close();
+                if (Settings.getBooleanProperty("davmail.popMarkReadOnRetr")) {
+                    message.markRead();
+                }
+            } catch (SocketException e) {
+                // can not send error to client after a socket exception
+                LOGGER.warn(BundleMessage.formatLog("LOG_CLIENT_CLOSED_CONNECTION"));
+            } catch (Exception e) {
+                DavGatewayTray.error(new BundleMessage("LOG_ERROR_RETRIEVING_MESSAGE"), e);
+                sendERR("error retrieving message " + e + ' ' + e.getMessage());
+            }
+        } else {
+            sendERR("invalid message index");
+        }
+    }
+
+    protected void handleDelete(StringTokenizer tokens) throws IOException {
+        if (tokens.hasMoreTokens()) {
+            ExchangeSession.Message message;
+            try {
+                int messageNumber = Integer.valueOf(tokens.nextToken()) - 1;
+                message = messages.get(messageNumber);
+                message.moveToTrash();
+                sendOK("DELETE");
+            } catch (NumberFormatException e) {
+                sendERR("invalid message index");
+            } catch (IndexOutOfBoundsException e) {
+                sendERR("invalid message index");
+            }
+        } else {
+            sendERR("invalid message index");
+        }
+    }
+
+
+    protected void handleTop(StringTokenizer tokens) throws IOException {
+        int message = 0;
+        try {
+            message = Integer.valueOf(tokens.nextToken());
+            int lines = Integer.valueOf(tokens.nextToken());
+            ExchangeSession.Message m = messages.get(message - 1);
+            sendOK("");
+            DoubleDotOutputStream doubleDotOutputStream = new DoubleDotOutputStream(os);
+            IOUtil.write(m.getRawInputStream(), new TopOutputStream(doubleDotOutputStream, lines));
+            doubleDotOutputStream.close();
+        } catch (NumberFormatException e) {
+            sendERR("invalid command");
+        } catch (IndexOutOfBoundsException e) {
+            sendERR("invalid message index: " + message);
+        } catch (Exception e) {
+            sendERR("error retreiving top of messages");
+            DavGatewayTray.error(e);
+        }
     }
 
     protected void sendOK(String message) throws IOException {

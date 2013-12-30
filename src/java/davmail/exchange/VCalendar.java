@@ -51,7 +51,7 @@ public class VCalendar extends VObject {
         }
         this.email = email;
         // set OWA timezone information
-        if (this.vTimezone == null && vTimezone != null) {
+        if (vTimezone != null) {
             setTimezone(vTimezone);
         }
     }

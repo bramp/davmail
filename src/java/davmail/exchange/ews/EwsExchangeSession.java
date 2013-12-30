@@ -1359,6 +1359,8 @@ public class EwsExchangeSession extends ExchangeSession {
                 itemName = StringUtil.base64ToUrl(itemId.id) + ".EML";
             }
             String instancetype = response.get(Field.get("instancetype").getResponseName());
+
+            // TODO BUG? isrecurring and calendaritemtype are not used.
             boolean isrecurring = "true".equals(response.get(Field.get("isrecurring").getResponseName()));
             String calendaritemtype = response.get(Field.get("calendaritemtype").getResponseName());
             isException = "3".equals(instancetype);

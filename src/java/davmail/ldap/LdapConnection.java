@@ -514,106 +514,19 @@ public class LdapConnection extends AbstractConnection {
 
     protected static final byte[] EMPTY_BYTE_ARRAY = new byte[0];
 
+    int currentMessageId = 0;
+
     protected void handleRequest(byte[] inbuf, int offset) throws IOException {
         //dumpBer(inbuf, offset);
         BerDecoder reqBer = new BerDecoder(inbuf, 0, offset);
-        int currentMessageId = 0;
+
         try {
             reqBer.parseSeq(null);
             currentMessageId = reqBer.parseInt();
             int requestOperation = reqBer.peekByte();
 
             if (requestOperation == LDAP_REQ_BIND) {
-                reqBer.parseSeq(null);
-                ldapVersion = reqBer.parseInt();
-                userName = reqBer.parseString(isLdapV3());
-                if (reqBer.peekByte() == (Ber.ASN_CONTEXT | Ber.ASN_CONSTRUCTOR | 3)) {
-                    // SASL authentication
-                    reqBer.parseSeq(null);
-                    // Get mechanism, usually DIGEST-MD5
-                    String mechanism = reqBer.parseString(isLdapV3());
-
-                    byte[] serverResponse;
-                    CallbackHandler callbackHandler = new CallbackHandler() {
-                        public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
-                            // look for username in callbacks
-                            for (Callback callback : callbacks) {
-                                if (callback instanceof NameCallback) {
-                                    userName = ((NameCallback) callback).getDefaultName();
-                                    // get password from session pool
-                                    password = ExchangeSessionFactory.getUserPassword(userName);
-                                }
-                            }
-                            // handle other callbacks
-                            for (Callback callback : callbacks) {
-                                if (callback instanceof AuthorizeCallback) {
-                                    ((AuthorizeCallback) callback).setAuthorized(true);
-                                } else if (callback instanceof PasswordCallback) {
-                                    if (password != null) {
-                                        ((PasswordCallback) callback).setPassword(password.toCharArray());
-                                    }
-                                }
-                            }
-                        }
-                    };
-                    int status;
-                    if (reqBer.bytesLeft() > 0 && saslServer != null) {
-                        byte[] clientResponse = reqBer.parseOctetString(Ber.ASN_OCTET_STR, null);
-                        serverResponse = saslServer.evaluateResponse(clientResponse);
-                        status = LDAP_SUCCESS;
-
-                        DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_USER", currentMessageId, userName));
-                        try {
-                            session = ExchangeSessionFactory.getInstance(userName, password);
-                            DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_SUCCESS"));
-                        } catch (IOException e) {
-                            serverResponse = EMPTY_BYTE_ARRAY;
-                            status = LDAP_INVALID_CREDENTIALS;
-                            DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_INVALID_CREDENTIALS"));
-                        }
-
-                    } else {
-                        Map<String, String> properties = new HashMap<String, String>();
-                        properties.put("javax.security.sasl.qop", "auth,auth-int");
-                        saslServer = Sasl.createSaslServer(mechanism, "ldap", client.getLocalAddress().getHostAddress(), properties, callbackHandler);
-                        serverResponse = saslServer.evaluateResponse(EMPTY_BYTE_ARRAY);
-                        status = LDAP_SASL_BIND_IN_PROGRESS;
-                    }
-
-                    responseBer.beginSeq(Ber.ASN_SEQUENCE | Ber.ASN_CONSTRUCTOR);
-                    responseBer.encodeInt(currentMessageId);
-                    responseBer.beginSeq(LDAP_REP_BIND);
-                    responseBer.encodeInt(status, LBER_ENUMERATED);
-                    // server credentials
-                    responseBer.encodeString("", isLdapV3());
-                    responseBer.encodeString("", isLdapV3());
-                    // challenge or response
-                    if (serverResponse != null) {
-                        responseBer.encodeOctetString(serverResponse, 0x87);
-                    }
-                    responseBer.endSeq();
-                    responseBer.endSeq();
-                    sendResponse();
-
-                } else {
-                    password = reqBer.parseStringWithTag(Ber.ASN_CONTEXT, isLdapV3(), null);
-
-                    if (userName.length() > 0 && password.length() > 0) {
-                        DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_USER", currentMessageId, userName));
-                        try {
-                            session = ExchangeSessionFactory.getInstance(userName, password);
-                            DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_SUCCESS"));
-                            sendClient(currentMessageId, LDAP_REP_BIND, LDAP_SUCCESS, "");
-                        } catch (IOException e) {
-                            DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_INVALID_CREDENTIALS"));
-                            sendClient(currentMessageId, LDAP_REP_BIND, LDAP_INVALID_CREDENTIALS, "");
-                        }
-                    } else {
-                        DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_ANONYMOUS", currentMessageId));
-                        // anonymous bind
-                        sendClient(currentMessageId, LDAP_REP_BIND, LDAP_SUCCESS, "");
-                    }
-                }
+                handleBind(reqBer);
 
             } else if (requestOperation == LDAP_REQ_UNBIND) {
                 DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_UNBIND", currentMessageId));
@@ -621,51 +534,10 @@ public class LdapConnection extends AbstractConnection {
                     session = null;
                 }
             } else if (requestOperation == LDAP_REQ_SEARCH) {
-                reqBer.parseSeq(null);
-                String dn = reqBer.parseString(isLdapV3());
-                int scope = reqBer.parseEnumeration();
-                /*int derefAliases =*/
-                reqBer.parseEnumeration();
-                int sizeLimit = reqBer.parseInt();
-                if (sizeLimit > 100 || sizeLimit == 0) {
-                    sizeLimit = 100;
-                }
-                int timelimit = reqBer.parseInt();
-                /*boolean typesOnly =*/
-                reqBer.parseBoolean();
-                LdapFilter ldapFilter = parseFilter(reqBer);
-                Set<String> returningAttributes = parseReturningAttributes(reqBer);
-                SearchRunnable searchRunnable = new SearchRunnable(currentMessageId, dn, scope, sizeLimit, timelimit, ldapFilter, returningAttributes);
-                if (BASE_CONTEXT.equalsIgnoreCase(dn) || OD_USER_CONTEXT.equalsIgnoreCase(dn) || OD_USER_CONTEXT_LION.equalsIgnoreCase(dn)) {
-                    // launch search in a separate thread
-                    synchronized (searchThreadMap) {
-                        searchThreadMap.put(currentMessageId, searchRunnable);
-                    }
-                    Thread searchThread = new Thread(searchRunnable);
-                    searchThread.setName(getName() + "-Search-" + currentMessageId);
-                    searchThread.start();
-                } else {
-                    // no need to create a separate thread, just run
-                    searchRunnable.run();
-                }
+                handleSearch(reqBer);
 
             } else if (requestOperation == LDAP_REQ_ABANDON) {
-                int abandonMessageId = 0;
-                try {
-                    abandonMessageId = (Integer) PARSE_INT_WITH_TAG_METHOD.invoke(reqBer, LDAP_REQ_ABANDON);
-                    synchronized (searchThreadMap) {
-                        SearchRunnable searchRunnable = searchThreadMap.get(abandonMessageId);
-                        if (searchRunnable != null) {
-                            searchRunnable.abandon();
-                            searchThreadMap.remove(currentMessageId);
-                        }
-                    }
-                } catch (IllegalAccessException e) {
-                    DavGatewayTray.error(e);
-                } catch (InvocationTargetException e) {
-                    DavGatewayTray.error(e);
-                }
-                DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_ABANDON_SEARCH", currentMessageId, abandonMessageId));
+                handleAbandon(reqBer);
             } else {
                 DavGatewayTray.debug(new BundleMessage("LOG_LDAP_UNSUPPORTED_OPERATION", requestOperation));
                 sendClient(currentMessageId, LDAP_REP_RESULT, LDAP_OTHER, "Unsupported operation");
@@ -681,14 +553,158 @@ public class LdapConnection extends AbstractConnection {
         }
     }
 
-    protected void dumpBer(byte[] inbuf, int offset) {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        Ber.dumpBER(baos, "LDAP request buffer\n", inbuf, 0, offset);
+    protected void handleBind(BerDecoder reqBer) throws IOException {
+        reqBer.parseSeq(null);
+        ldapVersion = reqBer.parseInt();
+        userName = reqBer.parseString(isLdapV3());
+        if (reqBer.peekByte() == (Ber.ASN_CONTEXT | Ber.ASN_CONSTRUCTOR | 3)) {
+            // SASL authentication
+            reqBer.parseSeq(null);
+            // Get mechanism, usually DIGEST-MD5
+            String mechanism = reqBer.parseString(isLdapV3());
+
+            byte[] serverResponse;
+            CallbackHandler callbackHandler = new CallbackHandler() {
+                public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
+                    // look for username in callbacks
+                    for (Callback callback : callbacks) {
+                        if (callback instanceof NameCallback) {
+                            userName = ((NameCallback) callback).getDefaultName();
+                            // get password from session pool
+                            password = ExchangeSessionFactory.getUserPassword(userName);
+                        }
+                    }
+                    // handle other callbacks
+                    for (Callback callback : callbacks) {
+                        if (callback instanceof AuthorizeCallback) {
+                            ((AuthorizeCallback) callback).setAuthorized(true);
+                        } else if (callback instanceof PasswordCallback) {
+                            if (password != null) {
+                                ((PasswordCallback) callback).setPassword(password.toCharArray());
+                            }
+                        }
+                    }
+                }
+            };
+            int status;
+            if (reqBer.bytesLeft() > 0 && saslServer != null) {
+                byte[] clientResponse = reqBer.parseOctetString(Ber.ASN_OCTET_STR, null);
+                serverResponse = saslServer.evaluateResponse(clientResponse);
+                status = LDAP_SUCCESS;
+
+                DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_USER", currentMessageId, userName));
+                try {
+                    session = ExchangeSessionFactory.getInstance(userName, password);
+                    DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_SUCCESS"));
+                } catch (IOException e) {
+                    serverResponse = EMPTY_BYTE_ARRAY;
+                    status = LDAP_INVALID_CREDENTIALS;
+                    DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_INVALID_CREDENTIALS"));
+                }
+
+            } else {
+                Map<String, String> properties = new HashMap<String, String>();
+                properties.put("javax.security.sasl.qop", "auth,auth-int");
+                saslServer = Sasl.createSaslServer(mechanism, "ldap", client.getLocalAddress().getHostAddress(), properties, callbackHandler);
+                serverResponse = saslServer.evaluateResponse(EMPTY_BYTE_ARRAY);
+                status = LDAP_SASL_BIND_IN_PROGRESS;
+            }
+
+            responseBer.beginSeq(Ber.ASN_SEQUENCE | Ber.ASN_CONSTRUCTOR);
+            responseBer.encodeInt(currentMessageId);
+            responseBer.beginSeq(LDAP_REP_BIND);
+            responseBer.encodeInt(status, LBER_ENUMERATED);
+            // server credentials
+            responseBer.encodeString("", isLdapV3());
+            responseBer.encodeString("", isLdapV3());
+            // challenge or response
+            if (serverResponse != null) {
+                responseBer.encodeOctetString(serverResponse, 0x87);
+            }
+            responseBer.endSeq();
+            responseBer.endSeq();
+            sendResponse();
+
+        } else {
+            password = reqBer.parseStringWithTag(Ber.ASN_CONTEXT, isLdapV3(), null);
+
+            if (userName.length() > 0 && password.length() > 0) {
+                DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_USER", currentMessageId, userName));
+                try {
+                    session = ExchangeSessionFactory.getInstance(userName, password);
+                    DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_SUCCESS"));
+                    sendClient(currentMessageId, LDAP_REP_BIND, LDAP_SUCCESS, "");
+                } catch (IOException e) {
+                    DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_INVALID_CREDENTIALS"));
+                    sendClient(currentMessageId, LDAP_REP_BIND, LDAP_INVALID_CREDENTIALS, "");
+                }
+            } else {
+                DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_ANONYMOUS", currentMessageId));
+                // anonymous bind
+                sendClient(currentMessageId, LDAP_REP_BIND, LDAP_SUCCESS, "");
+            }
+        }
+    }
+
+    protected void handleSearch(BerDecoder reqBer) throws IOException {
+        reqBer.parseSeq(null);
+        String dn = reqBer.parseString(isLdapV3());
+        int scope = reqBer.parseEnumeration();
+                /*int derefAliases =*/
+        reqBer.parseEnumeration();
+        int sizeLimit = reqBer.parseInt();
+        if (sizeLimit > 100 || sizeLimit == 0) {
+            sizeLimit = 100;
+        }
+        int timelimit = reqBer.parseInt();
+                /*boolean typesOnly =*/
+        reqBer.parseBoolean();
+        LdapFilter ldapFilter = parseFilter(reqBer);
+        Set<String> returningAttributes = parseReturningAttributes(reqBer);
+        SearchRunnable searchRunnable = new SearchRunnable(currentMessageId, dn, scope, sizeLimit, timelimit, ldapFilter, returningAttributes);
+        if (BASE_CONTEXT.equalsIgnoreCase(dn) || OD_USER_CONTEXT.equalsIgnoreCase(dn) || OD_USER_CONTEXT_LION.equalsIgnoreCase(dn)) {
+            // launch search in a separate thread
+            synchronized (searchThreadMap) {
+                searchThreadMap.put(currentMessageId, searchRunnable);
+            }
+            Thread searchThread = new Thread(searchRunnable);
+            searchThread.setName(getName() + "-Search-" + currentMessageId);
+            searchThread.start();
+        } else {
+            // no need to create a separate thread, just run
+            searchRunnable.run();
+        }
+    }
+
+    protected void handleAbandon(BerDecoder reqBer) {
+        int abandonMessageId = 0;
         try {
-            LOGGER.debug(new String(baos.toByteArray(), "UTF-8"));
-        } catch (UnsupportedEncodingException e) {
-            // should not happen
-            LOGGER.error(e);
+            abandonMessageId = (Integer) PARSE_INT_WITH_TAG_METHOD.invoke(reqBer, LDAP_REQ_ABANDON);
+            synchronized (searchThreadMap) {
+                SearchRunnable searchRunnable = searchThreadMap.get(abandonMessageId);
+                if (searchRunnable != null) {
+                    searchRunnable.abandon();
+                    searchThreadMap.remove(currentMessageId);
+                }
+            }
+        } catch (IllegalAccessException e) {
+            DavGatewayTray.error(e);
+        } catch (InvocationTargetException e) {
+            DavGatewayTray.error(e);
+        }
+        DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_ABANDON_SEARCH", currentMessageId, abandonMessageId));
+    }
+
+    protected void dumpBer(byte[] inbuf, int offset) {
+        if (LOGGER.isDebugEnabled()) {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            Ber.dumpBER(baos, "LDAP request buffer\n", inbuf, 0, offset);
+            try {
+                LOGGER.debug(new String(baos.toByteArray(), "UTF-8"));
+            } catch (UnsupportedEncodingException e) {
+                // should not happen
+                LOGGER.error(e);
+            }
         }
     }
 
