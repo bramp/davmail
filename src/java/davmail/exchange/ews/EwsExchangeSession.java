@@ -761,11 +761,7 @@ public class EwsExchangeSession extends ExchangeSession {
         }
 
         protected FieldURI getFieldURI() {
-            FieldURI fieldURI = Field.get(attributeName);
-            if (fieldURI == null) {
-                throw new IllegalArgumentException("Unknown field: " + attributeName);
-            }
-            return fieldURI;
+            return Field.get(attributeName);
         }
 
         protected Operator getOperator() {
