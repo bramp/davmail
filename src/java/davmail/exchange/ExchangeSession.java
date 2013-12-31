@@ -521,7 +521,7 @@ public abstract class ExchangeSession {
 
     protected HttpMethod postLogonMethod(HttpClient httpClient, HttpMethod logonMethod, String userName, String password) throws IOException {
 
-        setAuthFormFields(logonMethod, httpClient, password);
+        setAuthFormFields((PostMethod)logonMethod, httpClient, password);
 
         // add exchange 2010 PBack cookie in compatibility mode
         httpClient.getState().addCookie(new Cookie(httpClient.getHostConfiguration().getHost(), "PBack", "0", "/", null, false));
@@ -566,7 +566,7 @@ public abstract class ExchangeSession {
         return logonMethod;
     }
 
-    protected void setAuthFormFields(HttpMethod logonMethod, HttpClient httpClient, String password) throws IllegalArgumentException {
+    protected void setAuthFormFields(PostMethod logonMethod, HttpClient httpClient, String password) throws IllegalArgumentException {
         String userNameInput;
         if (userNameInputs.size() == 2) {
             String userid;
@@ -581,8 +581,8 @@ public abstract class ExchangeSession {
                 // adjust credentials
                 DavGatewayHttpClientFacade.setCredentials(httpClient, userName, password);
             }
-            ((PostMethod) logonMethod).removeParameter("userid");
-            ((PostMethod) logonMethod).addParameter("userid", userid);
+            logonMethod.removeParameter("userid");
+            logonMethod.addParameter("userid", userid);
 
             userNameInput = "username";
         } else if (userNameInputs.size() == 1) {
@@ -593,26 +593,26 @@ public abstract class ExchangeSession {
             userNameInput = "username";
         }
         // make sure username and password fields are empty
-        ((PostMethod) logonMethod).removeParameter(userNameInput);
+        logonMethod.removeParameter(userNameInput);
         if (passwordInput != null) {
-            ((PostMethod) logonMethod).removeParameter(passwordInput);
+            logonMethod.removeParameter(passwordInput);
         }
-        ((PostMethod) logonMethod).removeParameter("trusted");
-        ((PostMethod) logonMethod).removeParameter("flags");
+        logonMethod.removeParameter("trusted");
+        logonMethod.removeParameter("flags");
 
         if (passwordInput == null) {
             // This is a OTP pre-auth page. A different username may be required.
             otpPreAuthFound = true;
             otpPreAuthRetries++;
-            ((PostMethod) logonMethod).addParameter(userNameInput, preAuthUsername);
+            logonMethod.addParameter(userNameInput, preAuthUsername);
         } else {
             otpPreAuthFound = false;
             otpPreAuthRetries = 0;
             // This is a regular Exchange login page
-            ((PostMethod) logonMethod).addParameter(userNameInput, userName);
-            ((PostMethod) logonMethod).addParameter(passwordInput, password);
-            ((PostMethod) logonMethod).addParameter("trusted", "4");
-            ((PostMethod) logonMethod).addParameter("flags", "4");
+            logonMethod.addParameter(userNameInput, userName);
+            logonMethod.addParameter(passwordInput, password);
+            logonMethod.addParameter("trusted", "4");
+            logonMethod.addParameter("flags", "4");
         }
     }
 
