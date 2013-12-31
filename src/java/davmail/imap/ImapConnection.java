@@ -785,7 +785,7 @@ public class ImapConnection extends AbstractConnection {
         sendClient("* " + currentFolder.recent + " RECENT");
     }
 
-    class MessageWrapper {
+    static class MessageWrapper {
         protected OutputStream os;
         protected StringBuilder buffer;
         protected ExchangeSession.Message message;

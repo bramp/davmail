@@ -466,7 +466,7 @@ public abstract class EWSMethod extends PostMethod {
     /**
      * Meeting attendee object
      */
-    public static class Attendee {
+    public static class Attendee implements Serializable {
         /**
          * attendee role
          */
@@ -483,12 +483,12 @@ public abstract class EWSMethod extends PostMethod {
          * attendee fullname
          */
         public String name;
-            }
+    }
 
         /**
      * Recurring event occurrence
      */
-    public static class Occurrence {
+    public static class Occurrence implements Serializable {
         /**
          * Original occurence start date
          */

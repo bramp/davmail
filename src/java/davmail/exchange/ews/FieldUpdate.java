@@ -19,12 +19,13 @@
 package davmail.exchange.ews;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.io.Writer;
 
 /**
  * Field update
  */
-public class FieldUpdate {
+public class FieldUpdate implements Serializable {
     FieldURI fieldURI;
     String value;
 

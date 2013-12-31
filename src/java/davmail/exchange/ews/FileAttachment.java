@@ -19,12 +19,13 @@
 package davmail.exchange.ews;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.io.Writer;
 
 /**
  * File Attachment.
  */
-public class FileAttachment {
+public class FileAttachment implements Serializable {
     protected String name;
     protected String contentType;
     protected String content;

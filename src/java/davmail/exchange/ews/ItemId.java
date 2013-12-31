@@ -19,12 +19,13 @@
 package davmail.exchange.ews;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.io.Writer;
 
 /**
  * Item id.
  */
-public class ItemId {
+public class ItemId implements Serializable {
     protected final String name;
     protected final String id;
     protected final String changeKey;

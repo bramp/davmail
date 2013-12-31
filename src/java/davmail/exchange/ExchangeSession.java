@@ -2158,6 +2158,10 @@ public abstract class ExchangeSession {
      * Message list, includes a single messsage cache
      */
     public static class MessageList extends ArrayList<Message> {
+
+
+        private static final long serialVersionUID = 0;
+
         /**
          * Cached message content parsed in a MIME message.
          */
