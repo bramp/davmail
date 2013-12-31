@@ -19,8 +19,9 @@
 package davmail.exchange;
 
 import davmail.Settings;
+import davmail.exchange.entity.Event;
+import davmail.exchange.entity.Item;
 import davmail.exchange.ews.EwsExchangeSession;
-import davmail.exchange.ews.FolderQueryTraversal;
 import org.apache.log4j.Level;
 
 import javax.mail.MessagingException;
@@ -105,10 +106,10 @@ public class TestExchangeSessionCalendar extends AbstractExchangeSessionTestCase
     }
 
     public void testSearchCalendar() throws IOException {
-        List<ExchangeSession.Event> events = null;
+        List<Event> events = null;
         try {
             events = session.getAllEvents("/users/" + session.getEmail() + "/calendar");
-            for (ExchangeSession.Event event : events) {
+            for (Event event : events) {
                 System.out.println(event.getBody());
             }
         } catch (IOException e) {
@@ -118,12 +119,12 @@ public class TestExchangeSessionCalendar extends AbstractExchangeSessionTestCase
     }
 
     public void testReportCalendar() throws IOException {
-        List<ExchangeSession.Event> events = null;
+        List<Event> events = null;
         try {
             events = session.getAllEvents("/users/" + session.getEmail() + "/calendar");
-            for (ExchangeSession.Event event : events) {
-                System.out.println(event.subject);
-                ExchangeSession.Item item = session.getItem("/users/" + session.getEmail() + "/calendar", event.itemName);
+            for (Event event : events) {
+                System.out.println(event.getSubject());
+                Item item = session.getItem("/users/" + session.getEmail() + "/calendar", event.getName());
                 System.out.println(item.getBody());
             }
         } catch (IOException e) {
@@ -194,13 +195,13 @@ public class TestExchangeSessionCalendar extends AbstractExchangeSessionTestCase
     }
 
     public void testGetEvent() throws IOException {
-        ExchangeSession.Item item = session.getItem("calendar", "19083675-f8ce-4d81-8ac8-096fa0bd0e13.EML");
+        Item item = session.getItem("calendar", "19083675-f8ce-4d81-8ac8-096fa0bd0e13.EML");
         item.getBody();
     }
 
     public void testGetInbox() throws IOException {
-        List<ExchangeSession.Event> items = session.getEventMessages("INBOX");
-        for (ExchangeSession.Item item : items) {
+        List<Event> items = session.getEventMessages("INBOX");
+        for (Item item : items) {
             System.out.println(item.getBody());
         }
     }

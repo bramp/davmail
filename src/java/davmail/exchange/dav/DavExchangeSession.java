@@ -22,6 +22,8 @@ import davmail.BundleMessage;
 import davmail.Settings;
 import davmail.exception.*;
 import davmail.exchange.*;
+import davmail.exchange.condition.*;
+import davmail.exchange.entity.*;
 import davmail.http.DavGatewayHttpClientFacade;
 import davmail.ui.tray.DavGatewayTray;
 import davmail.util.IOUtil;
@@ -45,7 +47,6 @@ import org.w3c.dom.Node;
 
 import javax.mail.MessagingException;
 import javax.mail.Session;
-import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeMessage;
 import javax.mail.internet.MimeMultipart;
 import javax.mail.internet.MimePart;
@@ -339,30 +340,30 @@ public class DavExchangeSession extends ExchangeSession {
 
 
     @Override
-    public Map<String, ExchangeSession.Contact> galFind(Condition condition, Set<String> returningAttributes, int sizeLimit) throws IOException {
-        Map<String, ExchangeSession.Contact> contacts = new HashMap<String, ExchangeSession.Contact>();
+    public Map<String, Contact> galFind(Condition condition, Set<String> returningAttributes, int sizeLimit) throws IOException {
+        Map<String, Contact> contacts = new HashMap<String, Contact>();
         if (disableGalFind) {
             // do nothing
         } else if (condition instanceof MultiCondition) {
-            List<Condition> conditions = ((ExchangeSession.MultiCondition) condition).getConditions();
-            Operator operator = ((ExchangeSession.MultiCondition) condition).getOperator();
+            List<Condition> conditions = ((MultiCondition) condition).getConditions();
+            Operator operator = ((MultiCondition) condition).getOperator();
             if (operator == Operator.Or) {
                 for (Condition innerCondition : conditions) {
                     contacts.putAll(galFind(innerCondition, returningAttributes, sizeLimit));
                 }
             } else if (operator == Operator.And && !conditions.isEmpty()) {
-                Map<String, ExchangeSession.Contact> innerContacts = galFind(conditions.get(0), returningAttributes, sizeLimit);
-                for (ExchangeSession.Contact contact : innerContacts.values()) {
+                Map<String, Contact> innerContacts = galFind(conditions.get(0), returningAttributes, sizeLimit);
+                for (Contact contact : innerContacts.values()) {
                     if (condition.isMatch(contact)) {
                         contacts.put(contact.getName().toLowerCase(), contact);
                     }
                 }
             }
         } else if (condition instanceof AttributeCondition) {
-            String searchAttributeName = ((ExchangeSession.AttributeCondition) condition).getAttributeName();
+            String searchAttributeName = ((AttributeCondition) condition).getAttributeName();
             String searchAttribute = GALFIND_CRITERIA_MAP.get(searchAttributeName);
             if (searchAttribute != null) {
-                String searchValue = ((ExchangeSession.AttributeCondition) condition).getValue();
+                String searchValue = ((AttributeCondition) condition).getValue();
                 StringBuilder query = new StringBuilder();
                 if ("EM".equals(searchAttribute)) {
                     // mail search, split
@@ -385,7 +386,7 @@ public class DavExchangeSession extends ExchangeSession {
                 }
                 Map<String, Map<String, String>> results = galFind(query.toString());
                 for (Map<String, String> result : results.values()) {
-                    Contact contact = new Contact();
+                    DavContact contact = new DavContact(this);
                     contact.setName(result.get("AN"));
                     contact.put("imapUid", result.get("AN"));
                     buildGalfindContact(contact, result);
@@ -439,7 +440,7 @@ public class DavExchangeSession extends ExchangeSession {
      *
      * @param contact galfind contact
      */
-    public void galLookup(Contact contact) {
+    public void galLookup(DavContact contact) {
         if (!disableGalLookup) {
             LOGGER.debug("galLookup(" + contact.get("smtpemail1") + ')');
             GetMethod getMethod = null;
@@ -465,7 +466,7 @@ public class DavExchangeSession extends ExchangeSession {
         }
     }
 
-    protected void buildGalfindContact(Contact contact, Map<String, String> response) {
+    protected void buildGalfindContact(DavContact contact, Map<String, String> response) {
         for (Map.Entry<String, String> entry : GALFIND_ATTRIBUTE_MAP.entrySet()) {
             String attributeValue = response.get(entry.getValue());
             if (attributeValue != null) {
@@ -828,44 +829,6 @@ public class DavExchangeSession extends ExchangeSession {
         }
     }
 
-    protected static class MultiCondition extends ExchangeSession.MultiCondition {
-        protected MultiCondition(Operator operator, Condition... condition) {
-            super(operator, condition);
-        }
-
-        public void appendTo(StringBuilder buffer) {
-            boolean first = true;
-
-            for (Condition condition : conditions) {
-                if (condition != null && !condition.isEmpty()) {
-                    if (first) {
-                        buffer.append('(');
-                        first = false;
-                    } else {
-                        buffer.append(' ').append(operator).append(' ');
-                    }
-                    condition.appendTo(buffer);
-                }
-            }
-            // at least one non empty condition
-            if (!first) {
-                buffer.append(')');
-            }
-        }
-    }
-
-    protected static class NotCondition extends ExchangeSession.NotCondition {
-        protected NotCondition(Condition condition) {
-            super(condition);
-        }
-
-        public void appendTo(StringBuilder buffer) {
-            buffer.append("(Not ");
-            condition.appendTo(buffer);
-            buffer.append(')');
-        }
-    }
-
     static final Map<Operator, String> OPERATOR_MAP = new HashMap<Operator, String>();
 
     static {
@@ -882,115 +845,14 @@ public class DavExchangeSession extends ExchangeSession {
         OPERATOR_MAP.put(Operator.Contains, " = ");
     }
 
-    protected static class AttributeCondition extends ExchangeSession.AttributeCondition {
-        protected boolean isIntValue;
-
-        protected AttributeCondition(String attributeName, Operator operator, String value) {
-            super(attributeName, operator, value);
-        }
-
-        protected AttributeCondition(String attributeName, Operator operator, int value) {
-            super(attributeName, operator, String.valueOf(value));
-            isIntValue = true;
-        }
-
-        public void appendTo(StringBuilder buffer) {
-            Field field = Field.get(attributeName);
-            buffer.append('"').append(field.getUri()).append('"');
-            buffer.append(OPERATOR_MAP.get(operator));
-            //noinspection VariableNotUsedInsideIf
-            if (field.cast != null) {
-                buffer.append("CAST (\"");
-            } else if (!isIntValue && !field.isIntValue()) {
-                buffer.append('\'');
-            }
-            if (Operator.Like == operator) {
-                buffer.append('%');
-            }
-            if ("urlcompname".equals(field.alias)) {
-                buffer.append(StringUtil.encodeUrlcompname(StringUtil.davSearchEncode(value)));
-            } else if (field.isIntValue()) {
-                // check value
-                try {
-                    Integer.parseInt(value);
-                    buffer.append(value);
-                } catch (NumberFormatException e) {
-                    // invalid value, replace with 0
-                    buffer.append('0');
-                }
-            } else {
-                buffer.append(StringUtil.davSearchEncode(value));
-            }
-            if (Operator.Like == operator || Operator.StartsWith == operator) {
-                buffer.append('%');
-            }
-            if (field.cast != null) {
-                buffer.append("\" as '").append(field.cast).append("')");
-            } else if (!isIntValue && !field.isIntValue()) {
-                buffer.append('\'');
-            }
-        }
-
-        public boolean isMatch(ExchangeSession.Contact contact) {
-            String lowerCaseValue = value.toLowerCase();
-            String actualValue = contact.get(attributeName);
-            Operator actualOperator = operator;
-            // patch for iCal or Lightning search without galLookup
-            if (actualValue == null && ("givenName".equals(attributeName) || "sn".equals(attributeName))) {
-                actualValue = contact.get("cn");
-                actualOperator = Operator.Like;
-            }
-            if (actualValue == null) {
-                return false;
-            }
-            actualValue = actualValue.toLowerCase();
-            return (actualOperator == Operator.IsEqualTo && actualValue.equals(lowerCaseValue)) ||
-                    (actualOperator == Operator.Like && actualValue.contains(lowerCaseValue)) ||
-                    (actualOperator == Operator.StartsWith && actualValue.startsWith(lowerCaseValue));
-        }
-    }
-
-    protected static class HeaderCondition extends AttributeCondition {
-
-        protected HeaderCondition(String attributeName, Operator operator, String value) {
-            super(attributeName, operator, value);
-        }
-
-        @Override
-        public void appendTo(StringBuilder buffer) {
-            buffer.append('"').append(Field.getHeader(attributeName).getUri()).append('"');
-            buffer.append(OPERATOR_MAP.get(operator));
-            buffer.append('\'');
-            if (Operator.Like == operator) {
-                buffer.append('%');
-            }
-            buffer.append(value);
-            if (Operator.Like == operator) {
-                buffer.append('%');
-            }
-            buffer.append('\'');
-        }
-    }
-
-    protected static class MonoCondition extends ExchangeSession.MonoCondition {
-        protected MonoCondition(String attributeName, Operator operator) {
-            super(attributeName, operator);
-        }
-
-        public void appendTo(StringBuilder buffer) {
-            buffer.append('"').append(Field.get(attributeName).getUri()).append('"');
-            buffer.append(OPERATOR_MAP.get(operator));
-        }
+    @Override
+    public davmail.exchange.condition.MultiCondition and(Condition... condition) {
+        return new DavMultiCondition(Operator.And, condition);
     }
 
     @Override
-    public ExchangeSession.MultiCondition and(Condition... condition) {
-        return new MultiCondition(Operator.And, condition);
-    }
-
-    @Override
-    public ExchangeSession.MultiCondition or(Condition... condition) {
-        return new MultiCondition(Operator.Or, condition);
+    public davmail.exchange.condition.MultiCondition or(Condition... condition) {
+        return new DavMultiCondition(Operator.Or, condition);
     }
 
     @Override
@@ -998,58 +860,58 @@ public class DavExchangeSession extends ExchangeSession {
         if (condition == null) {
             return null;
         } else {
-            return new NotCondition(condition);
+            return new DavNotCondition(condition);
         }
     }
 
     @Override
     public Condition isEqualTo(String attributeName, String value) {
-        return new AttributeCondition(attributeName, Operator.IsEqualTo, value);
+        return new DavAttributeCondition(attributeName, Operator.IsEqualTo, value);
     }
 
     @Override
     public Condition isEqualTo(String attributeName, int value) {
-        return new AttributeCondition(attributeName, Operator.IsEqualTo, value);
+        return new DavAttributeCondition(attributeName, Operator.IsEqualTo, value);
     }
 
     @Override
     public Condition headerIsEqualTo(String headerName, String value) {
-        return new HeaderCondition(headerName, Operator.IsEqualTo, value);
+        return new DavHeaderCondition(headerName, Operator.IsEqualTo, value);
     }
 
     @Override
     public Condition gte(String attributeName, String value) {
-        return new AttributeCondition(attributeName, Operator.IsGreaterThanOrEqualTo, value);
+        return new DavAttributeCondition(attributeName, Operator.IsGreaterThanOrEqualTo, value);
     }
 
     @Override
     public Condition lte(String attributeName, String value) {
-        return new AttributeCondition(attributeName, Operator.IsLessThanOrEqualTo, value);
+        return new DavAttributeCondition(attributeName, Operator.IsLessThanOrEqualTo, value);
     }
 
     @Override
     public Condition lt(String attributeName, String value) {
-        return new AttributeCondition(attributeName, Operator.IsLessThan, value);
+        return new DavAttributeCondition(attributeName, Operator.IsLessThan, value);
     }
 
     @Override
     public Condition gt(String attributeName, String value) {
-        return new AttributeCondition(attributeName, Operator.IsGreaterThan, value);
+        return new DavAttributeCondition(attributeName, Operator.IsGreaterThan, value);
     }
 
     @Override
     public Condition contains(String attributeName, String value) {
-        return new AttributeCondition(attributeName, Operator.Like, value);
+        return new DavAttributeCondition(attributeName, Operator.Like, value);
     }
 
     @Override
     public Condition startsWith(String attributeName, String value) {
-        return new AttributeCondition(attributeName, Operator.StartsWith, value);
+        return new DavAttributeCondition(attributeName, Operator.StartsWith, value);
     }
 
     @Override
     public Condition isNull(String attributeName) {
-        return new MonoCondition(attributeName, Operator.IsNull);
+        return new DavMonoCondition(attributeName, Operator.IsNull);
     }
 
     @Override
@@ -1057,7 +919,7 @@ public class DavExchangeSession extends ExchangeSession {
         if ("Exchange2003".equals(this.serverVersion) && "deleted".equals(attributeName)) {
             return isEqualTo(attributeName, "1");
         } else {
-            return new MonoCondition(attributeName, Operator.IsTrue);
+            return new DavMonoCondition(attributeName, Operator.IsTrue);
         }
     }
 
@@ -1066,667 +928,14 @@ public class DavExchangeSession extends ExchangeSession {
         if ("Exchange2003".equals(this.serverVersion) && "deleted".equals(attributeName)) {
             return or(isEqualTo(attributeName, "0"), isNull(attributeName));
         } else {
-            return new MonoCondition(attributeName, Operator.IsFalse);
+            return new DavMonoCondition(attributeName, Operator.IsFalse);
         }
     }
 
-    /**
-     * @inheritDoc
-     */
-    public class Message extends ExchangeSession.Message {
-
-        @Override
-        public String getPermanentId() {
-            return permanentUrl;
-        }
-
-        @Override
-        protected InputStream getMimeHeaders() {
-            InputStream result = null;
-            try {
-                String messageHeaders = getItemProperty(permanentUrl, "messageheaders");
-                if (messageHeaders != null) {
-                    final String MS_HEADER = "Microsoft Mail Internet Headers Version 2.0";
-                    if (messageHeaders.startsWith(MS_HEADER)) {
-                        messageHeaders = messageHeaders.substring(MS_HEADER.length());
-                        if (!messageHeaders.isEmpty() && messageHeaders.charAt(0) == '\r') {
-                            messageHeaders = messageHeaders.substring(1);
-                        }
-                        if (!messageHeaders.isEmpty() && messageHeaders.charAt(0) == '\n') {
-                            messageHeaders = messageHeaders.substring(1);
-                        }
-                    }
-                    // workaround for messages in Sent folder
-                    if (messageHeaders.indexOf("From:") < 0) {
-                        String from = getItemProperty(permanentUrl, "from");
-                        messageHeaders = "From: "+from+"\n"+messageHeaders;
-                    }
-                    result = new ByteArrayInputStream(messageHeaders.getBytes("UTF-8"));
-                }
-            } catch (Exception e) {
-                LOGGER.warn(e.getMessage());
-            }
-
-            return result;
-        }
-    }
-
-
-    /**
-     * @inheritDoc
-     */
-    public class Contact extends ExchangeSession.Contact {
-        /**
-         * Build Contact instance from multistatusResponse info
-         *
-         * @param multiStatusResponse response
-         * @throws URIException     on error
-         * @throws DavMailException on error
-         */
-        public Contact(MultiStatusResponse multiStatusResponse) throws URIException, DavMailException {
-            setHref(URIUtil.decode(multiStatusResponse.getHref()));
-            DavPropertySet properties = multiStatusResponse.getProperties(HttpStatus.SC_OK);
-            permanentUrl = getURLPropertyIfExists(properties, "permanenturl");
-            etag = getPropertyIfExists(properties, "etag");
-            displayName = getPropertyIfExists(properties, "displayname");
-            for (String attributeName : CONTACT_ATTRIBUTES) {
-                String value = getPropertyIfExists(properties, attributeName);
-                if (value != null) {
-                    if ("bday".equals(attributeName) || "anniversary".equals(attributeName)
-                            || "lastmodified".equals(attributeName) || "datereceived".equals(attributeName)) {
-                        value = convertDateFromExchange(value);
-                    } else if ("haspicture".equals(attributeName) || "private".equals(attributeName)) {
-                        value = "1".equals(value) ? "true" : "false";
-                    }
-                    put(attributeName, value);
-                }
-            }
-        }
-
-        /**
-         * @inheritDoc
-         */
-        public Contact(String folderPath, String itemName, Map<String, String> properties, String etag, String noneMatch) {
-            super(folderPath, itemName, properties, etag, noneMatch);
-        }
-
-        /**
-         * Default constructor for galFind
-         */
-        public Contact() {
-        }
-
-        protected Set<PropertyValue> buildProperties() {
-            Set<PropertyValue> propertyValues = new HashSet<PropertyValue>();
-            for (Map.Entry<String, String> entry : entrySet()) {
-                String key = entry.getKey();
-                if (!"photo".equals(key)) {
-                    propertyValues.add(Field.createPropertyValue(key, entry.getValue()));
-                    if (key.startsWith("email")) {
-                        propertyValues.add(Field.createPropertyValue(key + "type", "SMTP"));
-                    }
-                }
-            }
-
-            return propertyValues;
-        }
-
-        protected ExchangePropPatchMethod internalCreateOrUpdate(String encodedHref) throws IOException {
-            ExchangePropPatchMethod propPatchMethod = new ExchangePropPatchMethod(encodedHref, buildProperties());
-            propPatchMethod.setRequestHeader("Translate", "f");
-            if (etag != null) {
-                propPatchMethod.setRequestHeader("If-Match", etag);
-            }
-            if (noneMatch != null) {
-                propPatchMethod.setRequestHeader("If-None-Match", noneMatch);
-            }
-            try {
-                httpClient.executeMethod(propPatchMethod);
-            } finally {
-                propPatchMethod.releaseConnection();
-            }
-            return propPatchMethod;
-        }
-
-        /**
-         * Create or update contact
-         *
-         * @return action result
-         * @throws IOException on error
-         */
-        public ItemResult createOrUpdate() throws IOException {
-            String encodedHref = URIUtil.encodePath(getHref());
-            ExchangePropPatchMethod propPatchMethod = internalCreateOrUpdate(encodedHref);
-            int status = propPatchMethod.getStatusCode();
-            if (status == HttpStatus.SC_MULTI_STATUS) {
-                status = propPatchMethod.getResponseStatusCode();
-                //noinspection VariableNotUsedInsideIf
-                if (status == HttpStatus.SC_CREATED) {
-                    LOGGER.debug("Created contact " + encodedHref);
-                } else {
-                    LOGGER.debug("Updated contact " + encodedHref);
-                }
-            } else if (status == HttpStatus.SC_NOT_FOUND) {
-                LOGGER.debug("Contact not found at " + encodedHref + ", searching permanenturl by urlcompname");
-                // failover, search item by urlcompname
-                MultiStatusResponse[] responses = searchItems(folderPath, EVENT_REQUEST_PROPERTIES, DavExchangeSession.this.isEqualTo("urlcompname", convertItemNameToEML(itemName)), FolderQueryTraversal.Shallow, 1);
-                if (responses.length == 1) {
-                    encodedHref = getPropertyIfExists(responses[0].getProperties(HttpStatus.SC_OK), "permanenturl");
-                    LOGGER.warn("Contact found, permanenturl is " + encodedHref);
-                    propPatchMethod = internalCreateOrUpdate(encodedHref);
-                    status = propPatchMethod.getStatusCode();
-                    if (status == HttpStatus.SC_MULTI_STATUS) {
-                        status = propPatchMethod.getResponseStatusCode();
-                        LOGGER.debug("Updated contact " + encodedHref);
-                    } else {
-                        LOGGER.warn("Unable to create or update contact " + status + ' ' + propPatchMethod.getStatusLine());
-                    }
-                }
-
-            } else {
-                LOGGER.warn("Unable to create or update contact " + status + ' ' + propPatchMethod.getStatusLine());
-            }
-            ItemResult itemResult = new ItemResult();
-            // 440 means forbidden on Exchange
-            if (status == 440) {
-                status = HttpStatus.SC_FORBIDDEN;
-            }
-            itemResult.status = status;
-
-            if (status == HttpStatus.SC_OK || status == HttpStatus.SC_CREATED) {
-                String contactPictureUrl = URIUtil.encodePath(getHref() + "/ContactPicture.jpg");
-                String photo = get("photo");
-                if (photo != null) {
-                    // need to update photo
-                    byte[] resizedImageBytes = IOUtil.resizeImage(Base64.decodeBase64(photo.getBytes()), 90);
-
-                    final PutMethod putmethod = new PutMethod(contactPictureUrl);
-                    putmethod.setRequestHeader("Overwrite", "t");
-                    putmethod.setRequestHeader("Content-Type", "image/jpeg");
-                    putmethod.setRequestEntity(new ByteArrayRequestEntity(resizedImageBytes, "image/jpeg"));
-                    try {
-                        status = httpClient.executeMethod(putmethod);
-                        if (status != HttpStatus.SC_OK && status != HttpStatus.SC_CREATED) {
-                            throw new IOException("Unable to update contact picture: " + status + ' ' + putmethod.getStatusLine());
-                        }
-                    } catch (IOException e) {
-                        LOGGER.error("Error in contact photo create or update", e);
-                        throw e;
-                    } finally {
-                        putmethod.releaseConnection();
-                    }
-
-                    Set<PropertyValue> picturePropertyValues = new HashSet<PropertyValue>();
-                    picturePropertyValues.add(Field.createPropertyValue("attachmentContactPhoto", "true"));
-                    // picturePropertyValues.add(Field.createPropertyValue("renderingPosition", "-1"));
-                    picturePropertyValues.add(Field.createPropertyValue("attachExtension", ".jpg"));
-
-                    final ExchangePropPatchMethod attachmentPropPatchMethod = new ExchangePropPatchMethod(contactPictureUrl, picturePropertyValues);
-                    try {
-                        status = httpClient.executeMethod(attachmentPropPatchMethod);
-                        if (status != HttpStatus.SC_MULTI_STATUS) {
-                            LOGGER.error("Error in contact photo create or update: " + attachmentPropPatchMethod.getStatusCode());
-                            throw new IOException("Unable to update contact picture");
-                        }
-                    } finally {
-                        attachmentPropPatchMethod.releaseConnection();
-                    }
-
-                } else {
-                    // try to delete picture
-                    DeleteMethod deleteMethod = new DeleteMethod(contactPictureUrl);
-                    try {
-                        status = httpClient.executeMethod(deleteMethod);
-                        if (status != HttpStatus.SC_OK && status != HttpStatus.SC_NOT_FOUND) {
-                            LOGGER.error("Error in contact photo delete: " + status);
-                            throw new IOException("Unable to delete contact picture");
-                        }
-                    } finally {
-                        deleteMethod.releaseConnection();
-                    }
-                }
-                // need to retrieve new etag
-                HeadMethod headMethod = new HeadMethod(URIUtil.encodePath(getHref()));
-                try {
-                    httpClient.executeMethod(headMethod);
-                    if (headMethod.getResponseHeader("ETag") != null) {
-                        itemResult.etag = headMethod.getResponseHeader("ETag").getValue();
-                    }
-                } finally {
-                    headMethod.releaseConnection();
-                }
-            }
-            return itemResult;
-
-        }
-
-    }
-
-    /**
-     * @inheritDoc
-     */
-    public class Event extends ExchangeSession.Event {
-        protected String instancetype;
-
-        /**
-         * Build Event instance from response info.
-         *
-         * @param multiStatusResponse response
-         * @throws URIException on error
-         */
-        public Event(MultiStatusResponse multiStatusResponse) throws URIException {
-            setHref(URIUtil.decode(multiStatusResponse.getHref()));
-            DavPropertySet properties = multiStatusResponse.getProperties(HttpStatus.SC_OK);
-            permanentUrl = getURLPropertyIfExists(properties, "permanenturl");
-            etag = getPropertyIfExists(properties, "etag");
-            displayName = getPropertyIfExists(properties, "displayname");
-            subject = getPropertyIfExists(properties, "subject");
-            instancetype = getPropertyIfExists(properties, "instancetype");
-            contentClass = getPropertyIfExists(properties, "contentclass");
-        }
-
-        protected String getPermanentUrl() {
-            return permanentUrl;
-        }
-
-
-        /**
-         * @inheritDoc
-         */
-        public Event(String folderPath, String itemName, String contentClass, String itemBody, String etag, String noneMatch) throws IOException {
-            super(folderPath, itemName, contentClass, itemBody, etag, noneMatch);
-        }
-
-        protected byte[] getICSFromInternetContentProperty() throws IOException, DavException, MessagingException {
-            byte[] result = null;
-            // PropFind PR_INTERNET_CONTENT
-            String propertyValue = getItemProperty(permanentUrl, "internetContent");
-            if (propertyValue != null) {
-                byte[] byteArray = Base64.decodeBase64(propertyValue.getBytes());
-                result = getICS(new ByteArrayInputStream(byteArray));
-            }
-            return result;
-        }
-
-        /**
-         * Load ICS content from Exchange server.
-         * User Translate: f header to get MIME event content and get ICS attachment from it
-         *
-         * @return ICS (iCalendar) event
-         * @throws HttpException on error
-         */
-        @Override
-        public byte[] getEventContent() throws IOException {
-            byte[] result = null;
-            LOGGER.debug("Get event subject: " + subject + " contentclass: "+contentClass+" href: " + getHref() + " permanentUrl: " + permanentUrl);
-            // do not try to load tasks MIME body
-            if (!"urn:content-classes:task".equals(contentClass)) {
-                // try to get PR_INTERNET_CONTENT
-                try {
-                    result = getICSFromInternetContentProperty();
-                    if (result == null) {
-                        GetMethod method = new GetMethod(encodeAndFixUrl(permanentUrl));
-                        method.setRequestHeader("Content-Type", "text/xml; charset=utf-8");
-                        method.setRequestHeader("Translate", "f");
-                        try {
-                            DavGatewayHttpClientFacade.executeGetMethod(httpClient, method, true);
-                            result = getICS(method.getResponseBodyAsStream());
-                        } finally {
-                            method.releaseConnection();
-                        }
-                    }
-                } catch (DavException e) {
-                    LOGGER.warn(e.getMessage());
-                } catch (IOException e) {
-                    LOGGER.warn(e.getMessage());
-                } catch (MessagingException e) {
-                    LOGGER.warn(e.getMessage());
-                }
-            }
-
-            // failover: rebuild event from MAPI properties
-            if (result == null) {
-                try {
-                    result = getICSFromItemProperties();
-                } catch (HttpException e) {
-                    deleteBroken();
-                    throw e;
-                }
-            }
-            // debug code
-            /*if (new String(result).indexOf("VTODO") < 0) {
-                LOGGER.debug("Original body: " + new String(result));
-                result = getICSFromItemProperties();
-                LOGGER.debug("Rebuilt body: " + new String(result));
-            }*/
-
-            return result;
-        }
-
-        private byte[] getICSFromItemProperties() throws IOException {
-            byte[] result;
-
-            // experimental: build VCALENDAR from properties
-
-            try {
-                //MultiStatusResponse[] responses = DavGatewayHttpClientFacade.executeMethod(httpClient, propFindMethod);
-                Set<String> eventProperties = new HashSet<String>();
-                eventProperties.add("method");
-
-                eventProperties.add("created");
-                eventProperties.add("calendarlastmodified");
-                eventProperties.add("dtstamp");
-                eventProperties.add("calendaruid");
-                eventProperties.add("subject");
-                eventProperties.add("dtstart");
-                eventProperties.add("dtend");
-                eventProperties.add("transparent");
-                eventProperties.add("organizer");
-                eventProperties.add("to");
-                eventProperties.add("description");
-                eventProperties.add("rrule");
-                eventProperties.add("exdate");
-                eventProperties.add("sensitivity");
-                eventProperties.add("alldayevent");
-                eventProperties.add("busystatus");
-                eventProperties.add("reminderset");
-                eventProperties.add("reminderdelta");
-                // task
-                eventProperties.add("importance");
-                eventProperties.add("uid");
-                eventProperties.add("taskstatus");
-                eventProperties.add("percentcomplete");
-                eventProperties.add("keywords");
-                eventProperties.add("startdate");
-                eventProperties.add("duedate");
-                eventProperties.add("datecompleted");
-
-                MultiStatusResponse[] responses = searchItems(folderPath, eventProperties, DavExchangeSession.this.isEqualTo("urlcompname", convertItemNameToEML(itemName)), FolderQueryTraversal.Shallow, 1);
-                if (responses.length == 0) {
-                    throw new HttpNotFoundException(permanentUrl + " not found");
-                }
-                DavPropertySet davPropertySet = responses[0].getProperties(HttpStatus.SC_OK);
-                VCalendar localVCalendar = new VCalendar();
-                localVCalendar.setPropertyValue("PRODID", "-//davmail.sf.net/NONSGML DavMail Calendar V1.1//EN");
-                localVCalendar.setPropertyValue("VERSION", "2.0");
-                localVCalendar.setPropertyValue("METHOD", getPropertyIfExists(davPropertySet, "method"));
-                VObject vEvent = new VObject();
-                vEvent.setPropertyValue("CREATED", convertDateFromExchange(getPropertyIfExists(davPropertySet, "created")));
-                vEvent.setPropertyValue("LAST-MODIFIED", convertDateFromExchange(getPropertyIfExists(davPropertySet, "calendarlastmodified")));
-                vEvent.setPropertyValue("DTSTAMP", convertDateFromExchange(getPropertyIfExists(davPropertySet, "dtstamp")));
-
-                String uid = getPropertyIfExists(davPropertySet, "calendaruid");
-                if (uid == null) {
-                    uid = getPropertyIfExists(davPropertySet, "uid");
-                }
-                vEvent.setPropertyValue("UID", uid);
-                vEvent.setPropertyValue("SUMMARY", getPropertyIfExists(davPropertySet, "subject"));
-                vEvent.setPropertyValue("DESCRIPTION", getPropertyIfExists(davPropertySet, "description"));
-                vEvent.setPropertyValue("PRIORITY", convertPriorityFromExchange(getPropertyIfExists(davPropertySet, "importance")));
-                vEvent.setPropertyValue("CATEGORIES", getPropertyIfExists(davPropertySet, "keywords"));
-                String sensitivity = getPropertyIfExists(davPropertySet, "sensitivity");
-                if ("2".equals(sensitivity)) {
-                    vEvent.setPropertyValue("CLASS", "PRIVATE");
-                } else if ("3".equals(sensitivity)) {
-                    vEvent.setPropertyValue("CLASS", "CONFIDENTIAL");
-                } else if ("0".equals(sensitivity)) {
-                    vEvent.setPropertyValue("CLASS", "PUBLIC");
-                }
-
-                if (instancetype == null) {
-                    vEvent.type = "VTODO";
-                    double percentComplete = getDoublePropertyIfExists(davPropertySet, "percentcomplete");
-                    if (percentComplete > 0) {
-                        vEvent.setPropertyValue("PERCENT-COMPLETE", String.valueOf((int) (percentComplete * 100)));
-                    }
-                    vEvent.setPropertyValue("STATUS", taskTovTodoStatusMap.get(getPropertyIfExists(davPropertySet, "taskstatus")));
-                    vEvent.setPropertyValue("DUE;VALUE=DATE", convertDateFromExchangeToTaskDate(getPropertyIfExists(davPropertySet, "duedate")));
-                    vEvent.setPropertyValue("DTSTART;VALUE=DATE", convertDateFromExchangeToTaskDate(getPropertyIfExists(davPropertySet, "startdate")));
-                    vEvent.setPropertyValue("COMPLETED;VALUE=DATE", convertDateFromExchangeToTaskDate(getPropertyIfExists(davPropertySet, "datecompleted")));
-
-                } else {
-                    vEvent.type = "VEVENT";
-                    // check mandatory dtstart value
-                    String dtstart = getPropertyIfExists(davPropertySet, "dtstart");
-                    if (dtstart != null) {
-                        vEvent.setPropertyValue("DTSTART", convertDateFromExchange(dtstart));
-                    } else {
-                        LOGGER.warn("missing dtstart on item, using fake value. Set davmail.deleteBroken=true to delete broken events");
-                        vEvent.setPropertyValue("DTSTART", "20000101T000000Z");
-                        deleteBroken();
-                    }
-                    // same on DTEND
-                    String dtend = getPropertyIfExists(davPropertySet, "dtend");
-                    if (dtend != null) {
-                        vEvent.setPropertyValue("DTEND", convertDateFromExchange(dtend));
-                    } else {
-                        LOGGER.warn("missing dtend on item, using fake value. Set davmail.deleteBroken=true to delete broken events");
-                        vEvent.setPropertyValue("DTEND", "20000101T010000Z");
-                        deleteBroken();
-                    }
-                    vEvent.setPropertyValue("TRANSP", getPropertyIfExists(davPropertySet, "transparent"));
-                    vEvent.setPropertyValue("RRULE", getPropertyIfExists(davPropertySet, "rrule"));
-                    String exdates = getPropertyIfExists(davPropertySet, "exdate");
-                    if (exdates != null) {
-                        String[] exdatearray = exdates.split(",");
-                        for (String exdate : exdatearray) {
-                            vEvent.addPropertyValue("EXDATE",
-                                    StringUtil.convertZuluDateTimeToAllDay(convertDateFromExchange(exdate)));
-                        }
-                    }
-                    String organizer = getPropertyIfExists(davPropertySet, "organizer");
-                    String organizerEmail = null;
-                    if (organizer != null) {
-                        InternetAddress organizerAddress = new InternetAddress(organizer);
-                        organizerEmail = organizerAddress.getAddress();
-                        vEvent.setPropertyValue("ORGANIZER", "MAILTO:" + organizerEmail);
-                    }
-
-                    // Parse attendee list
-                    String toHeader = getPropertyIfExists(davPropertySet, "to");
-                    if (toHeader != null && !toHeader.equals(organizerEmail)) {
-                        InternetAddress[] attendees = InternetAddress.parseHeader(toHeader, false);
-                        for (InternetAddress attendee : attendees) {
-                            if (!attendee.getAddress().equalsIgnoreCase(organizerEmail)) {
-                                VProperty vProperty = new VProperty("ATTENDEE", attendee.getAddress());
-                                if (attendee.getPersonal() != null) {
-                                    vProperty.addParam("CN", attendee.getPersonal());
-                                }
-                                vEvent.addProperty(vProperty);
-                            }
-                        }
-
-                    }
-                    vEvent.setPropertyValue("X-MICROSOFT-CDO-ALLDAYEVENT",
-                            "1".equals(getPropertyIfExists(davPropertySet, "alldayevent")) ? "TRUE" : "FALSE");
-                    vEvent.setPropertyValue("X-MICROSOFT-CDO-BUSYSTATUS", getPropertyIfExists(davPropertySet, "busystatus"));
-
-                    if ("1".equals(getPropertyIfExists(davPropertySet, "reminderset"))) {
-                        VObject vAlarm = new VObject();
-                        vAlarm.type = "VALARM";
-                        vAlarm.setPropertyValue("ACTION", "DISPLAY");
-                        vAlarm.setPropertyValue("DISPLAY", "Reminder");
-                        String reminderdelta = getPropertyIfExists(davPropertySet, "reminderdelta");
-                        VProperty vProperty = new VProperty("TRIGGER", "-PT" + reminderdelta + 'M');
-                        vProperty.addParam("VALUE", "DURATION");
-                        vAlarm.addProperty(vProperty);
-                        vEvent.addVObject(vAlarm);
-                    }
-                }
-
-                localVCalendar.addVObject(vEvent);
-                result = localVCalendar.toString().getBytes("UTF-8");
-            } catch (MessagingException e) {
-                LOGGER.warn("Unable to rebuild event content: " + e.getMessage(), e);
-                throw buildHttpException(e);
-            } catch (IOException e) {
-                LOGGER.warn("Unable to rebuild event content: " + e.getMessage(), e);
-                throw buildHttpException(e);
-            }
-
-            return result;
-        }
-
-        protected void deleteBroken() {
-            // try to delete broken event
-            if (Settings.getBooleanProperty("davmail.deleteBroken")) {
-                LOGGER.warn("Deleting broken event at: " + permanentUrl);
-                try {
-                    DavGatewayHttpClientFacade.executeDeleteMethod(httpClient, encodeAndFixUrl(permanentUrl));
-                } catch (IOException ioe) {
-                    LOGGER.warn("Unable to delete broken event at: " + permanentUrl);
-                }
-            }
-        }
-
-        protected PutMethod internalCreateOrUpdate(String encodedHref, byte[] mimeContent) throws IOException {
-            PutMethod putmethod = new PutMethod(encodedHref);
-            putmethod.setRequestHeader("Translate", "f");
-            putmethod.setRequestHeader("Overwrite", "f");
-            if (etag != null) {
-                putmethod.setRequestHeader("If-Match", etag);
-            }
-            if (noneMatch != null) {
-                putmethod.setRequestHeader("If-None-Match", noneMatch);
-            }
-            putmethod.setRequestHeader("Content-Type", "message/rfc822");
-            putmethod.setRequestEntity(new ByteArrayRequestEntity(mimeContent, "message/rfc822"));
-            try {
-                httpClient.executeMethod(putmethod);
-            } finally {
-                putmethod.releaseConnection();
-            }
-            return putmethod;
-        }
-
-        /**
-         * @inheritDoc
-         */
-        @Override
-        public ItemResult createOrUpdate() throws IOException {
-            ItemResult itemResult = new ItemResult();
-            if (vCalendar.isTodo()) {
-                if ((mailPath + calendarName).equals(folderPath)) {
-                    folderPath = mailPath + tasksName;
-                }
-                String encodedHref = URIUtil.encodePath(getHref());
-                Set<PropertyValue> propertyValues = new HashSet<PropertyValue>();
-                // set contentclass on create
-                if (noneMatch != null) {
-                    propertyValues.add(Field.createPropertyValue("contentclass", "urn:content-classes:task"));
-                    propertyValues.add(Field.createPropertyValue("outlookmessageclass", "IPM.Task"));
-                    propertyValues.add(Field.createPropertyValue("calendaruid", vCalendar.getFirstVeventPropertyValue("UID")));
-                }
-                propertyValues.add(Field.createPropertyValue("subject", vCalendar.getFirstVeventPropertyValue("SUMMARY")));
-                propertyValues.add(Field.createPropertyValue("description", vCalendar.getFirstVeventPropertyValue("DESCRIPTION")));
-                propertyValues.add(Field.createPropertyValue("importance", convertPriorityToExchange(vCalendar.getFirstVeventPropertyValue("PRIORITY"))));
-                String percentComplete = vCalendar.getFirstVeventPropertyValue("PERCENT-COMPLETE");
-                if (percentComplete == null) {
-                    percentComplete = "0";
-                }
-                propertyValues.add(Field.createPropertyValue("percentcomplete", String.valueOf(Double.parseDouble(percentComplete) / 100)));
-                String taskStatus = vTodoToTaskStatusMap.get(vCalendar.getFirstVeventPropertyValue("STATUS"));
-                propertyValues.add(Field.createPropertyValue("taskstatus", taskStatus));
-                propertyValues.add(Field.createPropertyValue("keywords", vCalendar.getFirstVeventPropertyValue("CATEGORIES")));
-                propertyValues.add(Field.createPropertyValue("startdate", convertTaskDateToZulu(vCalendar.getFirstVeventPropertyValue("DTSTART"))));
-                propertyValues.add(Field.createPropertyValue("duedate", convertTaskDateToZulu(vCalendar.getFirstVeventPropertyValue("DUE"))));
-                propertyValues.add(Field.createPropertyValue("datecompleted", convertTaskDateToZulu(vCalendar.getFirstVeventPropertyValue("COMPLETED"))));
-
-                propertyValues.add(Field.createPropertyValue("iscomplete", "2".equals(taskStatus) ? "true" : "false"));
-                propertyValues.add(Field.createPropertyValue("commonstart", convertTaskDateToZulu(vCalendar.getFirstVeventPropertyValue("DTSTART"))));
-                propertyValues.add(Field.createPropertyValue("commonend", convertTaskDateToZulu(vCalendar.getFirstVeventPropertyValue("DUE"))));
-
-                ExchangePropPatchMethod propPatchMethod = new ExchangePropPatchMethod(encodedHref, propertyValues);
-                propPatchMethod.setRequestHeader("Translate", "f");
-                if (etag != null) {
-                    propPatchMethod.setRequestHeader("If-Match", etag);
-                }
-                if (noneMatch != null) {
-                    propPatchMethod.setRequestHeader("If-None-Match", noneMatch);
-                }
-                try {
-                    int status = httpClient.executeMethod(propPatchMethod);
-
-                    if (status == HttpStatus.SC_MULTI_STATUS) {
-                        Item newItem = getItem(folderPath, itemName);
-                        itemResult.status = propPatchMethod.getResponseStatusCode();
-                        itemResult.etag = newItem.etag;
-                    } else {
-                        itemResult.status = status;
-                    }
-                } finally {
-                    propPatchMethod.releaseConnection();
-                }
-
-            } else {
-                String encodedHref = URIUtil.encodePath(getHref());
-                byte[] mimeContent = createMimeContent();
-                PutMethod putMethod = internalCreateOrUpdate(encodedHref, mimeContent);
-                int status = putMethod.getStatusCode();
-
-                if (status == HttpStatus.SC_OK) {
-                    LOGGER.debug("Updated event " + encodedHref);
-                } else if (status == HttpStatus.SC_CREATED) {
-                    LOGGER.debug("Created event " + encodedHref);
-                } else if (status == HttpStatus.SC_NOT_FOUND) {
-                    LOGGER.debug("Event not found at " + encodedHref + ", searching permanenturl by urlcompname");
-                    // failover, search item by urlcompname
-                    MultiStatusResponse[] responses = searchItems(folderPath, EVENT_REQUEST_PROPERTIES, DavExchangeSession.this.isEqualTo("urlcompname", convertItemNameToEML(itemName)), FolderQueryTraversal.Shallow, 1);
-                    if (responses.length == 1) {
-                        encodedHref = getPropertyIfExists(responses[0].getProperties(HttpStatus.SC_OK), "permanenturl");
-                        LOGGER.warn("Event found, permanenturl is " + encodedHref);
-                        putMethod = internalCreateOrUpdate(encodedHref, mimeContent);
-                        status = putMethod.getStatusCode();
-                        if (status == HttpStatus.SC_OK) {
-                            LOGGER.debug("Updated event " + encodedHref);
-                        } else {
-                            LOGGER.warn("Unable to create or update event " + status + ' ' + putMethod.getStatusLine());
-                        }
-                    }
-                } else {
-                    LOGGER.warn("Unable to create or update event " + status + ' ' + putMethod.getStatusLine());
-                }
-
-                // 440 means forbidden on Exchange
-                if (status == 440) {
-                    status = HttpStatus.SC_FORBIDDEN;
-                } else if (status == HttpStatus.SC_UNAUTHORIZED && getHref().startsWith("/public")) {
-                    LOGGER.warn("Ignore 401 unauthorized on public event");
-                    status = HttpStatus.SC_OK;
-                }
-                itemResult.status = status;
-                if (putMethod.getResponseHeader("GetETag") != null) {
-                    itemResult.etag = putMethod.getResponseHeader("GetETag").getValue();
-                }
-
-                // trigger activeSync push event, only if davmail.forceActiveSyncUpdate setting is true
-                if ((status == HttpStatus.SC_OK || status == HttpStatus.SC_CREATED) &&
-                        (Settings.getBooleanProperty("davmail.forceActiveSyncUpdate"))) {
-                    ArrayList<PropEntry> propertyList = new ArrayList<PropEntry>();
-                    // Set contentclass to make ActiveSync happy
-                    propertyList.add(Field.createDavProperty("contentclass", contentClass));
-                    // ... but also set PR_INTERNET_CONTENT to preserve custom properties
-                    propertyList.add(Field.createDavProperty("internetContent", new String(Base64.encodeBase64(mimeContent))));
-                    PropPatchMethod propPatchMethod = new PropPatchMethod(encodedHref, propertyList);
-                    int patchStatus = DavGatewayHttpClientFacade.executeHttpMethod(httpClient, propPatchMethod);
-                    if (patchStatus != HttpStatus.SC_MULTI_STATUS) {
-                        LOGGER.warn("Unable to patch event to trigger activeSync push");
-                    } else {
-                        // need to retrieve new etag
-                        Item newItem = getItem(folderPath, itemName);
-                        itemResult.etag = newItem.etag;
-                    }
-                }
-            }
-            return itemResult;
-        }
-
-
-    }
 
     protected Folder buildFolder(MultiStatusResponse entity) throws IOException {
         String href = URIUtil.decode(entity.getHref());
-        Folder folder = new Folder();
+        Folder folder = new Folder(this);
         DavPropertySet properties = entity.getProperties(HttpStatus.SC_OK);
         folder.displayName = getPropertyIfExists(properties, "displayname");
         folder.folderClass = getPropertyIfExists(properties, "folderclass");
@@ -2014,8 +1223,9 @@ public class DavExchangeSession extends ExchangeSession {
     }
 
 
-    protected Message buildMessage(MultiStatusResponse responseEntity) throws URIException, DavMailException {
-        Message message = new Message();
+    protected DavMessage buildMessage(MultiStatusResponse responseEntity) throws URIException, DavMailException {
+        DavMessage message = new DavMessage(this);
+
         message.messageUrl = URIUtil.decode(responseEntity.getHref());
         DavPropertySet properties = responseEntity.getProperties(HttpStatus.SC_OK);
 
@@ -2061,7 +1271,7 @@ public class DavExchangeSession extends ExchangeSession {
         MultiStatusResponse[] responses = searchItems(folderPath, attributes, and(isFalse("isfolder"), isFalse("ishidden"), condition), FolderQueryTraversal.Shallow, maxCount);
 
         for (MultiStatusResponse response : responses) {
-            Message message = buildMessage(response);
+            DavMessage message = buildMessage(response);
             message.messageList = messages;
             messages.add(message);
         }
@@ -2073,13 +1283,13 @@ public class DavExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    public List<ExchangeSession.Contact> searchContacts(String folderPath, Set<String> attributes, Condition condition, int maxCount) throws IOException {
-        List<ExchangeSession.Contact> contacts = new ArrayList<ExchangeSession.Contact>();
+    public List<Contact> searchContacts(String folderPath, Set<String> attributes, Condition condition, int maxCount) throws IOException {
+        List<Contact> contacts = new ArrayList<Contact>();
         MultiStatusResponse[] responses = searchItems(folderPath, attributes,
                 and(isEqualTo("outlookmessageclass", "IPM.Contact"), isFalse("isfolder"), isFalse("ishidden"), condition),
                 FolderQueryTraversal.Shallow, maxCount);
         for (MultiStatusResponse response : responses) {
-            contacts.add(new Contact(response));
+            contacts.add(new DavContact(this, response));
         }
         return contacts;
     }
@@ -2108,7 +1318,7 @@ public class DavExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    public List<ExchangeSession.Event> getEventMessages(String folderPath) throws IOException {
+    public List<Event> getEventMessages(String folderPath) throws IOException {
         return searchEvents(folderPath, ITEM_PROPERTIES,
                 and(isEqualTo("contentclass", "urn:content-classes:calendarmessage"),
                         or(isNull("processed"), isFalse("processed"))));
@@ -2116,12 +1326,12 @@ public class DavExchangeSession extends ExchangeSession {
 
 
     @Override
-    public List<ExchangeSession.Event> searchEvents(String folderPath, Set<String> attributes, Condition condition) throws IOException {
-        List<ExchangeSession.Event> events = new ArrayList<ExchangeSession.Event>();
+    public List<Event> searchEvents(String folderPath, Set<String> attributes, Condition condition) throws IOException {
         MultiStatusResponse[] responses = searchItems(folderPath, attributes, and(isFalse("isfolder"), isFalse("ishidden"), condition), FolderQueryTraversal.Shallow, 0);
+        List<Event> events = new ArrayList<Event>(responses.length);
         for (MultiStatusResponse response : responses) {
             String instancetype = getPropertyIfExists(response.getProperties(HttpStatus.SC_OK), "instancetype");
-            Event event = new Event(response);
+            DavEvent event = new DavEvent(this, response);
             //noinspection VariableNotUsedInsideIf
             if (instancetype == null) {
                 // check ics content
@@ -2239,10 +1449,10 @@ public class DavExchangeSession extends ExchangeSession {
                 }
             } catch (HttpNotFoundException e2) {
                 LOGGER.debug("last failover: search all items");
-                List<ExchangeSession.Event> events = getAllEvents(folderPath);
-                for (ExchangeSession.Event event : events) {
+                List<Event> events = getAllEvents(folderPath);
+                for (Event event : events) {
                     if (itemName.equals(event.getName())) {
-                        responses = DavGatewayHttpClientFacade.executePropFindMethod(httpClient, encodeAndFixUrl(((DavExchangeSession.Event) event).getPermanentUrl()), 0, EVENT_REQUEST_PROPERTIES_NAME_SET);
+                        responses = DavGatewayHttpClientFacade.executePropFindMethod(httpClient, encodeAndFixUrl(((DavEvent) event).getPermanentUrl()), 0, EVENT_REQUEST_PROPERTIES_NAME_SET);
                         break;
                     }
                 }
@@ -2257,7 +1467,7 @@ public class DavExchangeSession extends ExchangeSession {
         String urlcompname = getPropertyIfExists(responses[0].getProperties(HttpStatus.SC_OK), "urlcompname");
         if ("urn:content-classes:person".equals(contentClass)) {
             // retrieve Contact properties
-            List<ExchangeSession.Contact> contacts = searchContacts(folderPath, CONTACT_ATTRIBUTES,
+            List<Contact> contacts = searchContacts(folderPath, CONTACT_ATTRIBUTES,
                     isEqualTo("urlcompname", StringUtil.decodeUrlcompname(urlcompname)), 1);
             if (contacts.isEmpty()) {
                 LOGGER.warn("Item found, but unable to build contact");
@@ -2267,17 +1477,17 @@ public class DavExchangeSession extends ExchangeSession {
         } else if ("urn:content-classes:appointment".equals(contentClass)
                 || "urn:content-classes:calendarmessage".equals(contentClass)
                 || "urn:content-classes:task".equals(contentClass)) {
-            return new Event(responses[0]);
+            return new DavEvent(this, responses[0]);
         } else {
             LOGGER.warn("wrong contentclass on item " + itemPath + ": " + contentClass);
             // return item anyway
-            return new Event(responses[0]);
+            return new DavEvent(this, responses[0]);
         }
 
     }
 
     @Override
-    public ExchangeSession.ContactPhoto getContactPhoto(ExchangeSession.Contact contact) throws IOException {
+    public ContactPhoto getContactPhoto(Contact contact) throws IOException {
         ContactPhoto contactPhoto = null;
         if ("true".equals(contact.get("haspicture"))) {
             final GetMethod method = new GetMethod(URIUtil.encodePath(contact.getHref()) + "/ContactPicture.jpg");
@@ -2321,7 +1531,7 @@ public class DavExchangeSession extends ExchangeSession {
     @Override
     public int sendEvent(String icsBody) throws IOException {
         String itemName = UUID.randomUUID().toString() + ".EML";
-        byte[] mimeContent = (new Event(getFolderPath(DRAFTS), itemName, "urn:content-classes:calendarmessage", icsBody, null, null)).createMimeContent();
+        byte[] mimeContent = (new DavEvent(this, getFolderPath(DRAFTS), itemName, "urn:content-classes:calendarmessage", icsBody, null, null)).createMimeContent();
         if (mimeContent == null) {
             // no recipients, cancel
             return HttpStatus.SC_NO_CONTENT;
@@ -2358,7 +1568,7 @@ public class DavExchangeSession extends ExchangeSession {
 
     @Override
     public ItemResult internalCreateOrUpdateEvent(String folderPath, String itemName, String contentClass, String icsBody, String etag, String noneMatch) throws IOException {
-        return new Event(getFolderPath(folderPath), itemName, contentClass, icsBody, etag, noneMatch).createOrUpdate();
+        return new DavEvent(this, getFolderPath(folderPath), itemName, contentClass, icsBody, etag, noneMatch).createOrUpdate();
     }
 
     /**
@@ -2489,7 +1699,7 @@ public class DavExchangeSession extends ExchangeSession {
 
     @Override
     protected ItemResult internalCreateOrUpdateContact(String folderPath, String itemName, Map<String, String> properties, String etag, String noneMatch) throws IOException {
-        return new Contact(getFolderPath(folderPath), itemName, properties, etag, noneMatch).createOrUpdate();
+        return new DavContact(this, getFolderPath(folderPath), itemName, properties, etag, noneMatch).createOrUpdate();
     }
 
     protected List<PropEntry> buildProperties(Map<String, String> properties) {
@@ -2671,7 +1881,7 @@ public class DavExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    public void updateMessage(ExchangeSession.Message message, Map<String, String> properties) throws IOException {
+    public void updateMessage(Message message, Map<String, String> properties) throws IOException {
         PropPatchMethod patchMethod = new PropPatchMethod(encodeAndFixUrl(message.permanentUrl), buildProperties(properties)) {
             @Override
             protected void processResponseBody(HttpState httpState, HttpConnection httpConnection) {
@@ -2693,7 +1903,7 @@ public class DavExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    public void deleteMessage(ExchangeSession.Message message) throws IOException {
+    public void deleteMessage(Message message) throws IOException {
         LOGGER.debug("Delete " + message.permanentUrl + " (" + message.messageUrl + ')');
         DavGatewayHttpClientFacade.executeDeleteMethod(httpClient, encodeAndFixUrl(message.permanentUrl));
     }
@@ -2756,7 +1966,7 @@ public class DavExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    protected byte[] getContent(ExchangeSession.Message message) throws IOException {
+    public byte[] getContent(Message message) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         InputStream contentInputStream;
         try {
@@ -2937,7 +2147,7 @@ public class DavExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    public void moveMessage(ExchangeSession.Message message, String targetFolder) throws IOException {
+    public void moveMessage(Message message, String targetFolder) throws IOException {
         try {
             moveMessage(message.permanentUrl, targetFolder);
         } catch (HttpNotFoundException e) {
@@ -2967,7 +2177,7 @@ public class DavExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    public void copyMessage(ExchangeSession.Message message, String targetFolder) throws IOException {
+    public void copyMessage(Message message, String targetFolder) throws IOException {
         try {
             copyMessage(message.permanentUrl, targetFolder);
         } catch (HttpNotFoundException e) {
@@ -2994,7 +2204,7 @@ public class DavExchangeSession extends ExchangeSession {
     }
 
     @Override
-    protected void moveToTrash(ExchangeSession.Message message) throws IOException {
+    public void moveToTrash(Message message) throws IOException {
         String destination = URIUtil.encodePath(deleteditemsUrl) + '/' + UUID.randomUUID().toString();
         LOGGER.debug("Deleting : " + message.permanentUrl + " to " + destination);
         MoveMethod method = new MoveMethod(encodeAndFixUrl(message.permanentUrl), destination, false);

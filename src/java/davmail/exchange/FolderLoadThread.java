@@ -19,9 +19,9 @@
 package davmail.exchange;
 
 import davmail.Settings;
+import davmail.exchange.entity.Folder;
 import org.apache.log4j.Logger;
 
-import javax.mail.MessagingException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.SocketException;
@@ -33,10 +33,10 @@ public class FolderLoadThread extends Thread {
     private static final Logger LOGGER = Logger.getLogger(FolderLoadThread.class);
 
     boolean isComplete = false;
-    ExchangeSession.Folder folder;
+    Folder folder;
     IOException exception;
 
-    FolderLoadThread(String threadName, ExchangeSession.Folder folder) {
+    FolderLoadThread(String threadName, Folder folder) {
         super(threadName + "-LoadFolder");
         setDaemon(true);
         this.folder = folder;
@@ -60,7 +60,7 @@ public class FolderLoadThread extends Thread {
      * @throws InterruptedException on error
      * @throws IOException          on error
      */
-    public static void loadFolder(ExchangeSession.Folder folder, OutputStream outputStream) throws InterruptedException, IOException {
+    public static void loadFolder(Folder folder, OutputStream outputStream) throws InterruptedException, IOException {
         FolderLoadThread folderLoadThread = new FolderLoadThread(currentThread().getName(), folder);
         folderLoadThread.start();
         while (!folderLoadThread.isComplete) {

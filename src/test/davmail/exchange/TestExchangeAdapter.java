@@ -20,6 +20,9 @@ package davmail.exchange;
 
 import davmail.Settings;
 import davmail.exchange.dav.DavExchangeSession;
+import davmail.exchange.entity.Event;
+import davmail.exchange.entity.Folder;
+import davmail.exchange.entity.Message;
 import davmail.exchange.ews.EwsExchangeSession;
 import davmail.http.DavGatewaySSLProtocolSocketFactory;
 import junit.framework.TestCase;
@@ -49,7 +52,7 @@ public class TestExchangeAdapter extends TestCase {
         }
     }
 
-    public void assertEquals(ExchangeSession.Folder davFolder, ExchangeSession.Folder ewsFolder) {
+    public void assertEquals(Folder davFolder, Folder ewsFolder) {
         assertNotNull(ewsFolder);
         assertEquals(davFolder.folderPath, ewsFolder.folderPath);
         assertEquals(davFolder.folderClass, ewsFolder.folderClass);
@@ -77,44 +80,44 @@ public class TestExchangeAdapter extends TestCase {
     }
 
     public void testGetInbox() throws IOException {
-        ExchangeSession.Folder davFolder = davSession.getFolder("INBOX");
-        ExchangeSession.Folder ewsFolder = ewsSession.getFolder("INBOX");
+        Folder davFolder = davSession.getFolder("INBOX");
+        Folder ewsFolder = ewsSession.getFolder("INBOX");
         assertEquals(davFolder, ewsFolder);
     }
 
     public void testGetSubFolder() throws IOException {
-        ExchangeSession.Folder ewsFolder = ewsSession.getFolder("INBOX/bbbb");
+        Folder ewsFolder = ewsSession.getFolder("INBOX/bbbb");
     }
 
     public void testFindFolder() throws IOException {
-        List<ExchangeSession.Folder> davFolders = davSession.getSubFolders("", false);
+        List<Folder> davFolders = davSession.getSubFolders("", false);
         Settings.setLoggingLevel("httpclient.wire", Level.DEBUG);
-        List<ExchangeSession.Folder> ewsFolders = ewsSession.getSubFolders("", false);
+        List<Folder> ewsFolders = ewsSession.getSubFolders("", false);
         assertEquals(davFolders.size(), ewsFolders.size());
     }
 
     public void testFindPublicFolder() throws IOException {
-        List<ExchangeSession.Folder> davFolders = davSession.getSubFolders("/public", false);
+        List<Folder> davFolders = davSession.getSubFolders("/public", false);
         Settings.setLoggingLevel("httpclient.wire", Level.DEBUG);
-        List<ExchangeSession.Folder> ewsFolders = ewsSession.getSubFolders("/public", false);
+        List<Folder> ewsFolders = ewsSession.getSubFolders("/public", false);
         assertEquals(davFolders.size(), ewsFolders.size());
     }
 
     public void testFindFolders() throws IOException {
-        List<ExchangeSession.Folder> davFolders = davSession.getSubFolders("/public", null, true);
+        List<Folder> davFolders = davSession.getSubFolders("/public", null, true);
         System.out.println(davFolders);
     }
 
     public void testSearchMessages() throws IOException {
-        ExchangeSession.MessageList messages = davSession.searchMessages("INBOX");
-        for (ExchangeSession.Message message:messages) {
+        MessageList messages = davSession.searchMessages("INBOX");
+        for (Message message:messages) {
             System.out.println(message);
         }
     }
 
     public void testSearchEvents() throws IOException {
-        List<ExchangeSession.Event> events = davSession.getAllEvents("calendar");
-        for (ExchangeSession.Event event:events) {
+        List<Event> events = davSession.getAllEvents("calendar");
+        for (Event event:events) {
             System.out.println(event);
         }
     }

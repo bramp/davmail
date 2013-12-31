@@ -22,9 +22,8 @@ import davmail.AbstractConnection;
 import davmail.BundleMessage;
 import davmail.DavGateway;
 import davmail.Settings;
+import davmail.exchange.entity.Message;
 import davmail.io.DoubleDotOutputStream;
-import davmail.exchange.ExchangeSession;
-import davmail.exchange.ExchangeSessionFactory;
 import davmail.exchange.MessageLoadThread;
 import davmail.io.TopOutputStream;
 import davmail.ui.tray.DavGatewayTray;
@@ -44,7 +43,7 @@ import java.util.StringTokenizer;
 public class PopConnection extends AbstractConnection {
     private static final Logger LOGGER = Logger.getLogger(PopConnection.class);
 
-    private List<ExchangeSession.Message> messages;
+    private List<Message> messages;
 
     /**
      * Initialize the streams and start the thread.
@@ -57,7 +56,7 @@ public class PopConnection extends AbstractConnection {
 
     protected long getTotalMessagesLength() {
         int result = 0;
-        for (ExchangeSession.Message message : messages) {
+        for (Message message : messages) {
             result += message.size;
         }
         return result;
@@ -72,7 +71,7 @@ public class PopConnection extends AbstractConnection {
 
     protected void printList() throws IOException {
         int i = 1;
-        for (ExchangeSession.Message message : messages) {
+        for (Message message : messages) {
             sendClient(i++ + " " + message.size);
         }
         sendClient(".");
@@ -80,7 +79,7 @@ public class PopConnection extends AbstractConnection {
 
     protected void printUidList() throws IOException {
         int i = 1;
-        for (ExchangeSession.Message message : messages) {
+        for (Message message : messages) {
             sendClient(i++ + " " + message.getUid());
         }
         sendClient(".");
@@ -218,7 +217,7 @@ public class PopConnection extends AbstractConnection {
             String token = tokens.nextToken();
             try {
                 int messageNumber = Integer.valueOf(token);
-                ExchangeSession.Message message = messages.get(messageNumber - 1);
+                Message message = messages.get(messageNumber - 1);
                 sendOK("" + messageNumber + ' ' + message.size);
             } catch (NumberFormatException e) {
                 sendERR("Invalid message index: " + token);
@@ -256,7 +255,7 @@ public class PopConnection extends AbstractConnection {
         if (tokens.hasMoreTokens()) {
             try {
                 int messageNumber = Integer.valueOf(tokens.nextToken()) - 1;
-                ExchangeSession.Message message = messages.get(messageNumber);
+                Message message = messages.get(messageNumber);
 
                 // load big messages in a separate thread
                 os.write("+OK ".getBytes());
@@ -284,7 +283,7 @@ public class PopConnection extends AbstractConnection {
 
     protected void handleDelete(StringTokenizer tokens) throws IOException {
         if (tokens.hasMoreTokens()) {
-            ExchangeSession.Message message;
+            Message message;
             try {
                 int messageNumber = Integer.valueOf(tokens.nextToken()) - 1;
                 message = messages.get(messageNumber);
@@ -306,7 +305,7 @@ public class PopConnection extends AbstractConnection {
         try {
             message = Integer.valueOf(tokens.nextToken());
             int lines = Integer.valueOf(tokens.nextToken());
-            ExchangeSession.Message m = messages.get(message - 1);
+            Message m = messages.get(message - 1);
             sendOK("");
             DoubleDotOutputStream doubleDotOutputStream = new DoubleDotOutputStream(os);
             IOUtil.write(m.getRawInputStream(), new TopOutputStream(doubleDotOutputStream, lines));

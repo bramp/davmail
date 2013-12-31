@@ -19,6 +19,8 @@
 package davmail.exchange;
 
 import davmail.Settings;
+import davmail.exchange.entity.Folder;
+import davmail.exchange.entity.Message;
 
 import javax.mail.MessagingException;
 import java.io.IOException;
@@ -32,7 +34,7 @@ public class TestExchangeSessionFolder extends AbstractExchangeSessionTestCase {
     }
 
     public void testGetFolder() throws IOException {
-        ExchangeSession.Folder folder = session.getFolder("test");
+        Folder folder = session.getFolder("test");
         assertNotNull(folder);
         assertEquals("test", folder.folderPath);
         assertEquals("test", folder.displayName);
@@ -46,7 +48,7 @@ public class TestExchangeSessionFolder extends AbstractExchangeSessionTestCase {
 
     public void testSubFolder() throws IOException {
         session.createMessageFolder("test/subfolder");
-        ExchangeSession.Folder folder = session.getFolder("test/subfolder");
+        Folder folder = session.getFolder("test/subfolder");
         assertNotNull(folder);
         assertEquals("test/subfolder", folder.folderPath);
         assertEquals("subfolder", folder.displayName);
@@ -74,7 +76,7 @@ public class TestExchangeSessionFolder extends AbstractExchangeSessionTestCase {
         String folderName = "testcalendar";
         session.deleteFolder(folderName);
         session.createCalendarFolder(folderName, null);
-        ExchangeSession.Folder folder = session.getFolder(folderName);
+        Folder folder = session.getFolder(folderName);
         assertNotNull(folder);
         assertEquals("IPF.Appointment", folder.folderClass);
         session.deleteFolder(folderName);
@@ -84,7 +86,7 @@ public class TestExchangeSessionFolder extends AbstractExchangeSessionTestCase {
         String folderName = "testcontact";
         session.deleteFolder(folderName);
         session.createContactFolder(folderName, null);
-        ExchangeSession.Folder folder = session.getFolder(folderName);
+        Folder folder = session.getFolder(folderName);
         assertNotNull(folder);
         assertEquals("IPF.Contact", folder.folderClass);
         session.deleteFolder(folderName);
@@ -95,7 +97,7 @@ public class TestExchangeSessionFolder extends AbstractExchangeSessionTestCase {
         String folderName = "testé";
         session.deleteFolder(folderName);
         session.createMessageFolder(folderName);
-        ExchangeSession.Folder folder = session.getFolder(folderName);
+        Folder folder = session.getFolder(folderName);
         assertNotNull(folder);
         assertEquals(folderName, folder.displayName);
         assertEquals(folderName, folder.folderPath);
@@ -106,7 +108,7 @@ public class TestExchangeSessionFolder extends AbstractExchangeSessionTestCase {
         String folderName = "test space";
         session.deleteFolder(folderName);
         session.createMessageFolder(folderName);
-        ExchangeSession.Folder folder = session.getFolder(folderName);
+        Folder folder = session.getFolder(folderName);
         assertNotNull(folder);
         assertEquals(folderName, folder.displayName);
         assertEquals(folderName, folder.folderPath);
@@ -117,7 +119,7 @@ public class TestExchangeSessionFolder extends AbstractExchangeSessionTestCase {
         String folderName = "Special & accenté";
         session.deleteFolder(folderName);
         session.createMessageFolder(folderName);
-        ExchangeSession.Folder folder = session.getFolder(folderName);
+        Folder folder = session.getFolder(folderName);
         assertNotNull(folder);
         assertEquals(folderName, folder.displayName);
         assertEquals(folderName, folder.folderPath);
@@ -125,9 +127,9 @@ public class TestExchangeSessionFolder extends AbstractExchangeSessionTestCase {
     }
 
     public void testGetSharedFolder() throws IOException, MessagingException {
-        ExchangeSession.Folder folder = session.getFolder("/users/"+ Settings.getProperty("davmail.to")+"/inbox");
-        ExchangeSession.MessageList messages = session.searchMessages("/users/"+ Settings.getProperty("davmail.to")+"/inbox");
-        for (ExchangeSession.Message message:messages) {
+        Folder folder = session.getFolder("/users/"+ Settings.getProperty("davmail.to")+"/inbox");
+        MessageList messages = session.searchMessages("/users/"+ Settings.getProperty("davmail.to")+"/inbox");
+        for (Message message:messages) {
             System.out.println(message.getMimeMessage());
         }
         assertNotNull(folder);

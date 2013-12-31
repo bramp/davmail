@@ -48,7 +48,7 @@ public class TestExchangeSessionMessageFlags extends AbstractExchangeSessionTest
         HashMap<String, String> properties = new HashMap<String, String>();
         properties.put("draft", "9");
         session.createMessage("testfolder", messageName, properties, mimeMessage);
-        ExchangeSession.MessageList messageList = session.searchMessages("testfolder");
+        MessageList messageList = session.searchMessages("testfolder");
         assertNotNull(messageList);
         assertEquals(1, messageList.size());
         assertTrue(messageList.get(0).draft);
@@ -60,7 +60,7 @@ public class TestExchangeSessionMessageFlags extends AbstractExchangeSessionTest
         HashMap<String, String> properties = new HashMap<String, String>();
         properties.put("draft", "9");
         session.createMessage("testfolder", messageName, properties, mimeMessage);
-        ExchangeSession.MessageList messageList = session.searchMessages("testfolder");
+        MessageList messageList = session.searchMessages("testfolder");
         assertNotNull(messageList);
         assertEquals(1, messageList.size());
         assertTrue(messageList.get(0).draft);
@@ -73,7 +73,7 @@ public class TestExchangeSessionMessageFlags extends AbstractExchangeSessionTest
         HashMap<String, String> properties = new HashMap<String, String>();
         properties.put("draft", "1");
         session.createMessage("testfolder", messageName, properties, mimeMessage);
-        ExchangeSession.MessageList messageList = session.searchMessages("testfolder");
+        MessageList messageList = session.searchMessages("testfolder");
         assertNotNull(messageList);
         assertEquals(1, messageList.size());
         assertFalse(messageList.get(0).draft);
@@ -88,7 +88,7 @@ public class TestExchangeSessionMessageFlags extends AbstractExchangeSessionTest
         properties.put("draft", "8");
         properties.put("bcc", "testbcc@test.local");
         session.createMessage("testfolder", messageName, properties, mimeMessage);
-        ExchangeSession.MessageList messageList = session.searchMessages("testfolder");
+        MessageList messageList = session.searchMessages("testfolder");
         assertNotNull(messageList);
         assertEquals(1, messageList.size());
     }
@@ -103,7 +103,7 @@ public class TestExchangeSessionMessageFlags extends AbstractExchangeSessionTest
         cal.add(Calendar.MONTH, -1);
         properties.put("datereceived", dateFormatter.format(cal.getTime()));
         session.createMessage("testfolder", messageName, properties, mimeMessage);
-        ExchangeSession.MessageList messageList = session.searchMessages("testfolder");
+        MessageList messageList = session.searchMessages("testfolder");
         assertNotNull(messageList);
         assertEquals(1, messageList.size());
         assertNotNull(messageList);

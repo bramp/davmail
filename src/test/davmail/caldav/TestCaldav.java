@@ -21,6 +21,8 @@ package davmail.caldav;
 import davmail.AbstractDavMailTestCase;
 import davmail.DavGateway;
 import davmail.Settings;
+import davmail.exchange.condition.Condition;
+import davmail.exchange.entity.Event;
 import davmail.exchange.ExchangeSession;
 import davmail.exchange.ExchangeSessionFactory;
 import davmail.util.StringUtil;
@@ -185,11 +187,11 @@ public class TestCaldav extends AbstractDavMailTestCase {
         assertEquals(HttpStatus.SC_MULTI_STATUS, method.getStatusCode());
         MultiStatus multiStatus = method.getResponseBodyAsMultiStatus();
         MultiStatusResponse[] responses = multiStatus.getResponses();
-        ExchangeSession.Condition dateCondition = session.and(
+        Condition dateCondition = session.and(
                 session.gt("dtstart", session.formatSearchDate(start)),
                 session.lt("dtend", session.formatSearchDate(end))
         );
-        List<ExchangeSession.Event> events = session.searchEvents("/users/" + session.getEmail() + "/calendar/",
+        List<Event> events = session.searchEvents("/users/" + session.getEmail() + "/calendar/",
                 session.or(session.isEqualTo("instancetype", 1),
                         session.and(session.isEqualTo("instancetype", 0), dateCondition))
 

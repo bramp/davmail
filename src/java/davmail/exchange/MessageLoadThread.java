@@ -1,6 +1,7 @@
 package davmail.exchange;
 
 import davmail.Settings;
+import davmail.exchange.entity.Message;
 import org.apache.log4j.Logger;
 
 import javax.mail.MessagingException;
@@ -16,11 +17,11 @@ public class MessageLoadThread extends Thread {
     private static final Logger LOGGER = Logger.getLogger(MessageLoadThread.class);
 
     protected boolean isComplete = false;
-    protected ExchangeSession.Message message;
+    protected Message message;
     protected IOException ioException;
     protected MessagingException messagingException;
 
-    protected MessageLoadThread(String threadName, ExchangeSession.Message message) {
+    protected MessageLoadThread(String threadName, Message message) {
         super(threadName + "-LoadMessage");
         setDaemon(true);
         this.message = message;
@@ -47,7 +48,7 @@ public class MessageLoadThread extends Thread {
      * @throws IOException        on error
      * @throws MessagingException on error
      */
-    public static void loadMimeMessage(ExchangeSession.Message message, OutputStream outputStream) throws IOException, MessagingException {
+    public static void loadMimeMessage(Message message, OutputStream outputStream) throws IOException, MessagingException {
         if (message.size < 1024 * 1024) {
             message.loadMimeMessage();
         } else {

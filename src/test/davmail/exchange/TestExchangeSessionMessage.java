@@ -18,6 +18,9 @@
  */
 package davmail.exchange;
 
+import davmail.exchange.entity.Folder;
+import davmail.exchange.entity.Message;
+
 import javax.mail.MessagingException;
 import javax.mail.internet.MimeMessage;
 import javax.mail.util.SharedByteArrayInputStream;
@@ -29,7 +32,7 @@ import java.util.UUID;
  * Test message handling features.
  */
 public class TestExchangeSessionMessage extends AbstractExchangeSessionTestCase {
-    static ExchangeSession.Message message;
+    static Message message;
     static String messageName;
 
     public void testCreateMessage() throws IOException, MessagingException {
@@ -43,17 +46,17 @@ public class TestExchangeSessionMessage extends AbstractExchangeSessionTestCase 
     }
 
     public void testSearchInbox() throws IOException, MessagingException {
-        ExchangeSession.MessageList messageList = session.searchMessages("INBOX");
+        MessageList messageList = session.searchMessages("INBOX");
         assertNotNull(messageList);
     }
 
     public void testSearchTrash() throws IOException, MessagingException {
-        ExchangeSession.MessageList messageList = session.searchMessages("Trash");
+        MessageList messageList = session.searchMessages("Trash");
         assertNotNull(messageList);
     }
 
     public void testSearchMessage() throws IOException, MessagingException {
-        ExchangeSession.MessageList messageList = session.searchMessages("testfolder");
+        MessageList messageList = session.searchMessages("testfolder");
         assertNotNull(messageList);
         assertEquals(1, messageList.size());
         message = messageList.get(0);
@@ -68,7 +71,7 @@ public class TestExchangeSessionMessage extends AbstractExchangeSessionTestCase 
     }
 
     public void testFlagMessage() throws IOException, MessagingException {
-        ExchangeSession.Folder testFolder = session.getFolder("testfolder");
+        Folder testFolder = session.getFolder("testfolder");
         testFolder.loadMessages();
         HashMap<String,String> properties = new HashMap<String,String>();
         properties.put("flagged", "2");
@@ -95,13 +98,13 @@ public class TestExchangeSessionMessage extends AbstractExchangeSessionTestCase 
     }
 
     public void testFolderUidNext() throws IOException, MessagingException {
-        ExchangeSession.Folder folder = session.getFolder("testfolder");
+        Folder folder = session.getFolder("testfolder");
         assertTrue(folder.uidNext > 0);
     }
 
     public void testDeleteMessage() throws IOException {
         session.deleteMessage(message);
-        ExchangeSession.MessageList messageList = session.searchMessages("testfolder");
+        MessageList messageList = session.searchMessages("testfolder");
         assertNotNull(messageList);
         assertEquals(0, messageList.size());
     }
@@ -114,7 +117,7 @@ public class TestExchangeSessionMessage extends AbstractExchangeSessionTestCase 
         HashMap<String, String> properties = new HashMap<String, String>();
         properties.put("draft", "0");
         session.createMessage("testfolder", messageName, properties, mimeMessage);
-        ExchangeSession.MessageList messageList = session.searchMessages("testfolder", session.isEqualTo("urlcompname", messageName));
+        MessageList messageList = session.searchMessages("testfolder", session.isEqualTo("urlcompname", messageName));
         assertNotNull(messageList);
         assertEquals(1, messageList.size());
     }
@@ -127,7 +130,7 @@ public class TestExchangeSessionMessage extends AbstractExchangeSessionTestCase 
         HashMap<String, String> properties = new HashMap<String, String>();
         properties.put("draft", "0");
         session.createMessage("testfolder", messageName, properties, mimeMessage);
-        ExchangeSession.MessageList messageList = session.searchMessages("testfolder", session.isEqualTo("urlcompname", messageName));
+        MessageList messageList = session.searchMessages("testfolder", session.isEqualTo("urlcompname", messageName));
         assertNotNull(messageList);
         assertEquals(1, messageList.size());
     }
@@ -141,7 +144,7 @@ public class TestExchangeSessionMessage extends AbstractExchangeSessionTestCase 
         HashMap<String, String> properties = new HashMap<String, String>();
         properties.put("draft", "0");
         session.createMessage("testfolder", messageName, properties, mimeMessage);
-        ExchangeSession.MessageList messageList = session.searchMessages("testfolder", session.isEqualTo("urlcompname", messageName));
+        MessageList messageList = session.searchMessages("testfolder", session.isEqualTo("urlcompname", messageName));
         assertNotNull(messageList);
         assertEquals(1, messageList.size());
     }
@@ -154,7 +157,7 @@ public class TestExchangeSessionMessage extends AbstractExchangeSessionTestCase 
     }
 
     public void testSearchAaa() throws IOException, MessagingException {
-        ExchangeSession.MessageList messageList = session.searchMessages("aabb");
+        MessageList messageList = session.searchMessages("aabb");
         assertNotNull(messageList);
     }
 

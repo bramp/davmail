@@ -21,8 +21,9 @@ package davmail.smtp;
 import davmail.AbstractDavMailTestCase;
 import davmail.DavGateway;
 import davmail.Settings;
+import davmail.exchange.entity.Message;
+import davmail.exchange.MessageList;
 import davmail.io.DoubleDotOutputStream;
-import davmail.exchange.ExchangeSession;
 import davmail.exchange.ExchangeSessionFactory;
 import org.apache.commons.codec.binary.Base64;
 
@@ -136,7 +137,7 @@ public class TestSmtp extends AbstractDavMailTestCase {
         writeLine(".");
         assertEquals("250 Queued mail for delivery", readLine());
         // wait for asynchronous message send
-        ExchangeSession.MessageList messages = null;
+        MessageList messages = null;
         for (int i = 0; i < 5; i++) {
             messages = session.searchMessages("Sent", session.headerIsEqualTo("references", mimeMessage.getMessageID()));
             if (messages.size() > 0) {
@@ -145,7 +146,7 @@ public class TestSmtp extends AbstractDavMailTestCase {
             Thread.sleep(1000);
         }
         assertEquals(1, messages.size());
-        ExchangeSession.Message sentMessage = messages.get(0);
+        Message sentMessage = messages.get(0);
         sentMessage.getMimeMessage().writeTo(System.out);
         assertEquals(mimeMessage.getDataHandler().getContent(), sentMessage.getMimeMessage().getDataHandler().getContent());
     }

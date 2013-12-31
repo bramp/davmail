@@ -18,22 +18,16 @@
  */
 package davmail.exchange;
 
-import davmail.exchange.AbstractExchangeSessionTestCase;
-import davmail.exchange.ExchangeSession;
 import davmail.exchange.dav.DavExchangeSession;
 import davmail.exchange.dav.ExchangePropFindMethod;
-import davmail.exchange.dav.Field;
-import org.apache.commons.codec.binary.Base64;
+import davmail.exchange.entity.Folder;
 import org.apache.commons.httpclient.HttpStatus;
 import org.apache.commons.httpclient.util.URIUtil;
 import org.apache.jackrabbit.webdav.DavException;
-import org.apache.jackrabbit.webdav.MultiStatus;
 import org.apache.jackrabbit.webdav.MultiStatusResponse;
-import org.apache.jackrabbit.webdav.client.methods.PropFindMethod;
 import org.apache.jackrabbit.webdav.property.DavPropertyNameSet;
 import org.apache.jackrabbit.webdav.property.DavPropertySet;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 
 /**
@@ -41,7 +35,7 @@ import java.io.IOException;
  */
 public class TestExchangePropfindMethod extends AbstractExchangeSessionTestCase {
     public void testGetFolder() throws IOException, DavException {
-        ExchangeSession.Folder folder = session.getFolder("INBOX");
+        Folder folder = session.getFolder("INBOX");
         assertNotNull(folder);
         DavPropertyNameSet davPropertyNameSet = new DavPropertyNameSet();
            // davPropertyNameSet.add(Field.getPropertyName("displayname"));

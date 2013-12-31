@@ -1,6 +1,7 @@
 package davmail.exchange;
 
 import davmail.Settings;
+import davmail.exchange.entity.Folder;
 import davmail.http.DavGatewaySSLProtocolSocketFactory;
 
 /**
@@ -30,7 +31,7 @@ public class TestExchangeSession {
             sessionFactory.checkConfig();
             session = sessionFactory.getInstance(argv[currentArg++], argv[currentArg]);
 
-            ExchangeSession.Folder folder = session.getFolder("INBOX");
+            Folder folder = session.getFolder("INBOX");
             folder.loadMessages();
 
             //session.purgeOldestTrashAndSentMessages();

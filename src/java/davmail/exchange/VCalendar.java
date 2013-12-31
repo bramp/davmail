@@ -148,11 +148,11 @@ public class VCalendar extends VObject {
         }
     }
 
-    protected String getMethod() {
+    public String getMethod() {
         return getPropertyValue("METHOD");
     }
 
-    protected void fixVCalendar(boolean fromServer) {
+    public void fixVCalendar(boolean fromServer) {
         // set iCal 4 global X-CALENDARSERVER-ACCESS from CLASS
         if (fromServer) {
             setPropertyValue("X-CALENDARSERVER-ACCESS", getCalendarServerAccess());
@@ -719,7 +719,7 @@ public class VCalendar extends VObject {
         return recipients;
     }
 
-    protected String getAttendeeStatus() {
+    public String getAttendeeStatus() {
         String status = null;
         List<VProperty> attendeeProperties = getFirstVeventProperties("ATTENDEE");
         if (attendeeProperties != null) {

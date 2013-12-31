@@ -22,12 +22,10 @@ import davmail.Settings;
 import davmail.exception.DavMailAuthenticationException;
 import davmail.exception.DavMailException;
 import davmail.exception.HttpNotFoundException;
-import davmail.exchange.ExchangeSession;
-import davmail.exchange.VCalendar;
-import davmail.exchange.VObject;
-import davmail.exchange.VProperty;
+import davmail.exchange.*;
+import davmail.exchange.condition.Condition;
+import davmail.exchange.entity.*;
 import davmail.http.DavGatewayHttpClientFacade;
-import davmail.util.IOUtil;
 import davmail.util.StringUtil;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.httpclient.*;
@@ -39,12 +37,8 @@ import org.apache.commons.httpclient.params.HttpClientParams;
 
 import javax.mail.MessagingException;
 import javax.mail.Session;
-import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeMessage;
-import javax.mail.util.SharedByteArrayInputStream;
 import java.io.*;
-import java.net.HttpURLConnection;
-import java.net.SocketException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -114,8 +108,12 @@ public class EwsExchangeSession extends ExchangeSession {
 
     protected Map<String, String> folderIdMap;
 
-    protected class Folder extends ExchangeSession.Folder {
+    protected static class Folder extends davmail.exchange.entity.Folder {
         public FolderId folderId;
+
+        public Folder(ExchangeSession exchangeSession) {
+            super(exchangeSession);
+        }
     }
 
     protected static class FolderPath {
@@ -375,45 +373,6 @@ public class EwsExchangeSession extends ExchangeSession {
         return ewsUrl;
     }
 
-    class Message extends ExchangeSession.Message {
-        // message item id
-        ItemId itemId;
-
-        @Override
-        public String getPermanentId() {
-            return itemId.id;
-        }
-
-        @Override
-        protected InputStream getMimeHeaders() {
-            InputStream result = null;
-            try {
-                GetItemMethod getItemMethod = new GetItemMethod(BaseShape.ID_ONLY, itemId, false);
-                getItemMethod.addAdditionalProperty(Field.get("messageheaders"));
-                getItemMethod.addAdditionalProperty(Field.get("from"));
-                executeMethod(getItemMethod);
-                EWSMethod.Item item = getItemMethod.getResponseItem();
-
-                String messageHeaders = item.get(Field.get("messageheaders").getResponseName());
-                if (messageHeaders != null
-                        // workaround for broken message headers on Exchange 2010
-                        && messageHeaders.toLowerCase().contains("message-id:")) {
-                    // workaround for messages in Sent folder
-                    if (messageHeaders.indexOf("From:") < 0) {
-                        String from = item.get(Field.get("from").getResponseName());
-                        messageHeaders = "From: " + from + "\n" + messageHeaders;
-                    }
-
-                    result = new ByteArrayInputStream(messageHeaders.getBytes("UTF-8"));
-                }
-            } catch (Exception e) {
-                LOGGER.warn(e.getMessage());
-            }
-
-            return result;
-        }
-    }
-
     /**
      * Message create/update properties
      *
@@ -482,7 +441,7 @@ public class EwsExchangeSession extends ExchangeSession {
     }
 
     @Override
-    public void updateMessage(ExchangeSession.Message message, Map<String, String> properties) throws IOException {
+    public void updateMessage(Message message, Map<String, String> properties) throws IOException {
         if (properties.containsKey("read") && "urn:content-classes:appointment".equals(message.contentClass)) {
             properties.remove("read");
         }
@@ -490,15 +449,15 @@ public class EwsExchangeSession extends ExchangeSession {
             UpdateItemMethod updateItemMethod = new UpdateItemMethod(MessageDisposition.SaveOnly,
                     ConflictResolution.AlwaysOverwrite,
                     SendMeetingInvitationsOrCancellations.SendToNone,
-                    ((EwsExchangeSession.Message) message).itemId, buildProperties(properties));
+                    ((EwsMessage) message).itemId, buildProperties(properties));
             executeMethod(updateItemMethod);
         }
     }
 
     @Override
-    public void deleteMessage(ExchangeSession.Message message) throws IOException {
+    public void deleteMessage(Message message) throws IOException {
         LOGGER.debug("Delete " + message.permanentUrl);
-        DeleteItemMethod deleteItemMethod = new DeleteItemMethod(((EwsExchangeSession.Message) message).itemId, DeleteType.HardDelete, SendMeetingCancellations.SendToNone);
+        DeleteItemMethod deleteItemMethod = new DeleteItemMethod(((EwsMessage) message).itemId, DeleteType.HardDelete, SendMeetingCancellations.SendToNone);
         executeMethod(deleteItemMethod);
     }
 
@@ -542,8 +501,8 @@ public class EwsExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    protected byte[] getContent(ExchangeSession.Message message) throws IOException {
-        return getContent(((EwsExchangeSession.Message) message).itemId);
+    public byte[] getContent(Message message) throws IOException {
+        return getContent(((EwsMessage) message).itemId);
     }
 
     /**
@@ -616,8 +575,8 @@ public class EwsExchangeSession extends ExchangeSession {
         return mimeContent;
     }
 
-    protected Message buildMessage(EWSMethod.Item response) throws DavMailException {
-        Message message = new Message();
+    protected EwsMessage buildMessage(EWSMethod.Item response) throws DavMailException {
+        EwsMessage message = new EwsMessage(this);
 
         // get item id
         message.itemId = new ItemId(response);
@@ -667,7 +626,7 @@ public class EwsExchangeSession extends ExchangeSession {
 
         for (EWSMethod.Item response : responses) {
             if (MESSAGE_TYPES.contains(response.type)) {
-                Message message = buildMessage(response);
+                EwsMessage message = buildMessage(response);
                 message.messageList = messages;
                 messages.add(message);
             }
@@ -704,7 +663,7 @@ public class EwsExchangeSession extends ExchangeSession {
         return results;
     }
 
-    protected static class MultiCondition extends ExchangeSession.MultiCondition implements SearchExpression {
+    protected static class MultiCondition extends davmail.exchange.condition.MultiCondition implements SearchExpression {
         protected MultiCondition(Operator operator, Condition... condition) {
             super(operator, condition);
         }
@@ -732,7 +691,7 @@ public class EwsExchangeSession extends ExchangeSession {
         }
     }
 
-    protected static class NotCondition extends ExchangeSession.NotCondition implements SearchExpression {
+    protected static class NotCondition extends davmail.exchange.condition.NotCondition implements SearchExpression {
         protected NotCondition(Condition condition) {
             super(condition);
         }
@@ -745,7 +704,7 @@ public class EwsExchangeSession extends ExchangeSession {
     }
 
 
-    protected static class AttributeCondition extends ExchangeSession.AttributeCondition implements SearchExpression {
+    protected static class AttributeCondition extends davmail.exchange.condition.AttributeCondition implements SearchExpression {
         protected ContainmentMode containmentMode;
         protected ContainmentComparison containmentComparison;
 
@@ -808,7 +767,7 @@ public class EwsExchangeSession extends ExchangeSession {
             buffer.append("</t:").append(operator.toString()).append('>');
         }
 
-        public boolean isMatch(ExchangeSession.Contact contact) {
+        public boolean isMatch(Contact contact) {
             String lowerCaseValue = value.toLowerCase();
 
             String actualValue = contact.get(attributeName);
@@ -826,52 +785,13 @@ public class EwsExchangeSession extends ExchangeSession {
 
     }
 
-    protected static class HeaderCondition extends AttributeCondition {
-
-        protected HeaderCondition(String attributeName, String value) {
-            super(attributeName, Operator.Contains, value);
-            containmentMode = ContainmentMode.Substring;
-            containmentComparison = ContainmentComparison.IgnoreCase;
-        }
-
-        @Override
-        protected FieldURI getFieldURI() {
-            return new ExtendedFieldURI(ExtendedFieldURI.DistinguishedPropertySetType.InternetHeaders, attributeName);
-        }
-
-    }
-
-    protected static class IsNullCondition implements ExchangeSession.Condition, SearchExpression {
-        protected final String attributeName;
-
-        protected IsNullCondition(String attributeName) {
-            this.attributeName = attributeName;
-        }
-
-        public void appendTo(StringBuilder buffer) {
-            buffer.append("<t:Not><t:Exists>");
-            Field.get(attributeName).appendTo(buffer);
-            buffer.append("</t:Exists></t:Not>");
-        }
-
-        public boolean isEmpty() {
-            return false;
-        }
-
-        public boolean isMatch(ExchangeSession.Contact contact) {
-            String actualValue = contact.get(attributeName);
-            return actualValue == null;
-        }
-
-    }
-
     @Override
-    public ExchangeSession.MultiCondition and(Condition... condition) {
+    public MultiCondition and(Condition... condition) {
         return new MultiCondition(Operator.And, condition);
     }
 
     @Override
-    public ExchangeSession.MultiCondition or(Condition... condition) {
+    public MultiCondition or(Condition... condition) {
         return new MultiCondition(Operator.Or, condition);
     }
 
@@ -970,7 +890,7 @@ public class EwsExchangeSession extends ExchangeSession {
     }
 
     protected Folder buildFolder(EWSMethod.Item item) {
-        Folder folder = new Folder();
+        Folder folder = new Folder(this);
         folder.folderId = new FolderId(item);
         folder.displayName = item.get(Field.get("folderDisplayName").getResponseName());
         folder.folderClass = item.get(Field.get("folderclass").getResponseName());
@@ -990,7 +910,7 @@ public class EwsExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    public List<ExchangeSession.Folder> getSubFolders(String folderPath, Condition condition, boolean recursive) throws IOException {
+    public List<davmail.exchange.entity.Folder> getSubFolders(String folderPath, Condition condition, boolean recursive) throws IOException {
         String baseFolderPath = folderPath;
         if (baseFolderPath.startsWith("/users/")) {
             int index = baseFolderPath.indexOf('/', "/users/".length());
@@ -998,12 +918,12 @@ public class EwsExchangeSession extends ExchangeSession {
                 baseFolderPath = baseFolderPath.substring(index + 1);
             }
         }
-        List<ExchangeSession.Folder> folders = new ArrayList<ExchangeSession.Folder>();
+        List<davmail.exchange.entity.Folder> folders = new ArrayList<davmail.exchange.entity.Folder>();
         appendSubFolders(folders, baseFolderPath, getFolderId(folderPath), condition, recursive);
         return folders;
     }
 
-    protected void appendSubFolders(List<ExchangeSession.Folder> folders,
+    protected void appendSubFolders(List<davmail.exchange.entity.Folder> folders,
                                     String parentFolderPath, FolderId parentFolderId,
                                     Condition condition, boolean recursive) throws IOException {
         FindFolderMethod findFolderMethod = new FindFolderMethod(FolderQueryTraversal.SHALLOW,
@@ -1101,8 +1021,8 @@ public class EwsExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    public void moveMessage(ExchangeSession.Message message, String targetFolder) throws IOException {
-        MoveItemMethod moveItemMethod = new MoveItemMethod(((EwsExchangeSession.Message) message).itemId, getFolderId(targetFolder));
+    public void moveMessage(Message message, String targetFolder) throws IOException {
+        MoveItemMethod moveItemMethod = new MoveItemMethod(((EwsMessage) message).itemId, getFolderId(targetFolder));
         executeMethod(moveItemMethod);
     }
 
@@ -1110,8 +1030,8 @@ public class EwsExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    public void copyMessage(ExchangeSession.Message message, String targetFolder) throws IOException {
-        CopyItemMethod copyItemMethod = new CopyItemMethod(((EwsExchangeSession.Message) message).itemId, getFolderId(targetFolder));
+    public void copyMessage(Message message, String targetFolder) throws IOException {
+        CopyItemMethod copyItemMethod = new CopyItemMethod(((EwsMessage) message).itemId, getFolderId(targetFolder));
         executeMethod(copyItemMethod);
     }
 
@@ -1145,7 +1065,7 @@ public class EwsExchangeSession extends ExchangeSession {
         Item item = getItem(sourceFolderPath.parentPath, sourceFolderPath.folderName);
         FolderPath targetFolderPath = new FolderPath(targetPath);
         FolderId toFolderId = getFolderId(targetFolderPath.parentPath);
-        MoveItemMethod moveItemMethod = new MoveItemMethod(((Event) item).itemId, toFolderId);
+        MoveItemMethod moveItemMethod = new MoveItemMethod(((EwsEvent) item).itemId, toFolderId);
         executeMethod(moveItemMethod);
     }
 
@@ -1153,624 +1073,19 @@ public class EwsExchangeSession extends ExchangeSession {
      * @inheritDoc
      */
     @Override
-    protected void moveToTrash(ExchangeSession.Message message) throws IOException {
-        MoveItemMethod moveItemMethod = new MoveItemMethod(((EwsExchangeSession.Message) message).itemId, getFolderId(TRASH));
+    public void moveToTrash(Message message) throws IOException {
+        MoveItemMethod moveItemMethod = new MoveItemMethod(((EwsMessage) message).itemId, getFolderId(TRASH));
         executeMethod(moveItemMethod);
     }
 
-    protected class Contact extends ExchangeSession.Contact {
-        // item id
-        ItemId itemId;
-
-        protected Contact(EWSMethod.Item response) throws DavMailException {
-            itemId = new ItemId(response);
-
-            permanentUrl = response.get(Field.get("permanenturl").getResponseName());
-            etag = response.get(Field.get("etag").getResponseName());
-            displayName = response.get(Field.get("displayname").getResponseName());
-            itemName = StringUtil.decodeUrlcompname(response.get(Field.get("urlcompname").getResponseName()));
-            // workaround for missing urlcompname in Exchange 2010
-            if (itemName == null) {
-                itemName = StringUtil.base64ToUrl(itemId.id) + ".EML";
-            }
-            for (String attributeName : CONTACT_ATTRIBUTES) {
-                String value = response.get(Field.get(attributeName).getResponseName());
-                if (value != null && value.length() > 0) {
-                    if ("bday".equals(attributeName) || "anniversary".equals(attributeName) || "lastmodified".equals(attributeName) || "datereceived".equals(attributeName)) {
-                        value = convertDateFromExchange(value);
-                    }
-                    put(attributeName, value);
-                }
-            }
-        }
-
-        /**
-         * @inheritDoc
-         */
-        protected Contact(String folderPath, String itemName, Map<String, String> properties, String etag, String noneMatch) {
-            super(folderPath, itemName, properties, etag, noneMatch);
-        }
-
-        /**
-         * Empty constructor for GalFind
-         */
-        protected Contact() {
-        }
-
-        protected void buildProperties(List<FieldUpdate> updates) {
-            for (Map.Entry<String, String> entry : entrySet()) {
-                if ("photo".equals(entry.getKey())) {
-                    updates.add(Field.createFieldUpdate("haspicture", "true"));
-                } else if (!entry.getKey().startsWith("email") && !entry.getKey().startsWith("smtpemail")
-                        && !entry.getKey().equals("fileas")) {
-                    updates.add(Field.createFieldUpdate(entry.getKey(), entry.getValue()));
-                }
-            }
-            if (get("fileas") != null) {
-                updates.add(Field.createFieldUpdate("fileas", get("fileas")));
-            }
-            // handle email addresses
-            IndexedFieldUpdate emailFieldUpdate = null;
-            for (Map.Entry<String, String> entry : entrySet()) {
-                if (entry.getKey().startsWith("smtpemail") && entry.getValue() != null) {
-                    if (emailFieldUpdate == null) {
-                        emailFieldUpdate = new IndexedFieldUpdate("EmailAddresses");
-                    }
-                    emailFieldUpdate.addFieldValue(Field.createFieldUpdate(entry.getKey(), entry.getValue()));
-                }
-            }
-            if (emailFieldUpdate != null) {
-                updates.add(emailFieldUpdate);
-            }
-        }
-
-
-        /**
-         * Create or update contact
-         *
-         * @return action result
-         * @throws IOException on error
-         */
-        public ItemResult createOrUpdate() throws IOException {
-            String photo = get("photo");
-
-            ItemResult itemResult = new ItemResult();
-            EWSMethod createOrUpdateItemMethod;
-
-            // first try to load existing event
-            String currentEtag = null;
-            ItemId currentItemId = null;
-            FileAttachment currentFileAttachment = null;
-            EWSMethod.Item currentItem = getEwsItem(folderPath, itemName);
-            if (currentItem != null) {
-                currentItemId = new ItemId(currentItem);
-                currentEtag = currentItem.get(Field.get("etag").getResponseName());
-
-                // load current picture
-                GetItemMethod getItemMethod = new GetItemMethod(BaseShape.ID_ONLY, currentItemId, false);
-                getItemMethod.addAdditionalProperty(Field.get("attachments"));
-                executeMethod(getItemMethod);
-                EWSMethod.Item item = getItemMethod.getResponseItem();
-                if (item != null) {
-                    currentFileAttachment = item.getAttachmentByName("ContactPicture.jpg");
-                }
-            }
-            if ("*".equals(noneMatch)) {
-                // create requested
-                if (currentItemId != null) {
-                    itemResult.status = HttpStatus.SC_PRECONDITION_FAILED;
-                    return itemResult;
-                }
-            } else if (etag != null) {
-                // update requested
-                if (currentItemId == null || !etag.equals(currentEtag)) {
-                    itemResult.status = HttpStatus.SC_PRECONDITION_FAILED;
-                    return itemResult;
-                }
-            }
-
-            List<FieldUpdate> properties = new ArrayList<FieldUpdate>();
-            if (currentItemId != null) {
-                buildProperties(properties);
-                // update
-                createOrUpdateItemMethod = new UpdateItemMethod(MessageDisposition.SaveOnly,
-                        ConflictResolution.AlwaysOverwrite,
-                        SendMeetingInvitationsOrCancellations.SendToNone,
-                        currentItemId, properties);
-            } else {
-                // create
-                EWSMethod.Item newItem = new EWSMethod.Item();
-                newItem.type = "Contact";
-                // force urlcompname on create
-                properties.add(Field.createFieldUpdate("urlcompname", convertItemNameToEML(itemName)));
-                buildProperties(properties);
-                newItem.setFieldUpdates(properties);
-                createOrUpdateItemMethod = new CreateItemMethod(MessageDisposition.SaveOnly, getFolderId(folderPath), newItem);
-            }
-            executeMethod(createOrUpdateItemMethod);
-
-            itemResult.status = createOrUpdateItemMethod.getStatusCode();
-            if (itemResult.status == HttpURLConnection.HTTP_OK) {
-                //noinspection VariableNotUsedInsideIf
-                if (etag == null) {
-                    itemResult.status = HttpStatus.SC_CREATED;
-                    LOGGER.debug("Created contact " + getHref());
-                } else {
-                    LOGGER.debug("Updated contact " + getHref());
-                }
-            } else {
-                return itemResult;
-            }
-
-            ItemId newItemId = new ItemId(createOrUpdateItemMethod.getResponseItem());
-
-            // disable contact picture handling on Exchange 2007
-            if (!"Exchange2007_SP1".equals(serverVersion)) {
-                // first delete current picture
-                if (currentFileAttachment != null) {
-                    DeleteAttachmentMethod deleteAttachmentMethod = new DeleteAttachmentMethod(currentFileAttachment.attachmentId);
-                    executeMethod(deleteAttachmentMethod);
-                }
-
-                if (photo != null) {
-                    // convert image to jpeg
-                    byte[] resizedImageBytes = IOUtil.resizeImage(Base64.decodeBase64(photo.getBytes()), 90);
-
-                    FileAttachment attachment = new FileAttachment("ContactPicture.jpg", "image/jpeg", new String(Base64.encodeBase64(resizedImageBytes)));
-                    attachment.setIsContactPhoto(true);
-
-                    // update photo attachment
-                    CreateAttachmentMethod createAttachmentMethod = new CreateAttachmentMethod(newItemId, attachment);
-                    executeMethod(createAttachmentMethod);
-                }
-            }
-
-            GetItemMethod getItemMethod = new GetItemMethod(BaseShape.ID_ONLY, newItemId, false);
-            getItemMethod.addAdditionalProperty(Field.get("etag"));
-            executeMethod(getItemMethod);
-            itemResult.etag = getItemMethod.getResponseItem().get(Field.get("etag").getResponseName());
-
-            return itemResult;
-        }
-    }
-
-    protected class Event extends ExchangeSession.Event {
-        // item id
-        ItemId itemId;
-        String type;
-        boolean isException;
-
-        protected Event(EWSMethod.Item response) {
-            itemId = new ItemId(response);
-
-            type = response.type;
-
-            permanentUrl = response.get(Field.get("permanenturl").getResponseName());
-            etag = response.get(Field.get("etag").getResponseName());
-            displayName = response.get(Field.get("displayname").getResponseName());
-            subject = response.get(Field.get("subject").getResponseName());
-            itemName = StringUtil.decodeUrlcompname(response.get(Field.get("urlcompname").getResponseName()));
-            // workaround for missing urlcompname in Exchange 2010
-            if (itemName == null) {
-                itemName = StringUtil.base64ToUrl(itemId.id) + ".EML";
-            }
-            String instancetype = response.get(Field.get("instancetype").getResponseName());
-
-            // TODO BUG? isrecurring and calendaritemtype are not used.
-            boolean isrecurring = "true".equals(response.get(Field.get("isrecurring").getResponseName()));
-            String calendaritemtype = response.get(Field.get("calendaritemtype").getResponseName());
-            isException = "3".equals(instancetype);
-        }
-
-        /**
-         * @inheritDoc
-         */
-        protected Event(String folderPath, String itemName, String contentClass, String itemBody, String etag, String noneMatch) throws IOException {
-            super(folderPath, itemName, contentClass, itemBody, etag, noneMatch);
-        }
-
-        @Override
-        public ItemResult createOrUpdate() throws IOException {
-            if (vCalendar.isTodo() && isMainCalendar(folderPath)) {
-                // task item, move to tasks folder
-                folderPath = TASKS;
-            }
-
-            ItemResult itemResult = new ItemResult();
-            EWSMethod createOrUpdateItemMethod;
-
-            // first try to load existing event
-            String currentEtag = null;
-            ItemId currentItemId = null;
-            String ownerResponseReply = null;
-
-            EWSMethod.Item currentItem = getEwsItem(folderPath, itemName);
-            if (currentItem != null) {
-                currentItemId = new ItemId(currentItem);
-                currentEtag = currentItem.get(Field.get("etag").getResponseName());
-                LOGGER.debug("Existing item found with etag: " + currentEtag + " client etag: " + etag + " id: " + currentItemId.id);
-            }
-            if ("*".equals(noneMatch)) {
-                // create requested
-                if (currentItemId != null) {
-                    itemResult.status = HttpStatus.SC_PRECONDITION_FAILED;
-                    return itemResult;
-                }
-            } else if (etag != null) {
-                // update requested
-                if (currentItemId == null || !etag.equals(currentEtag)) {
-                    itemResult.status = HttpStatus.SC_PRECONDITION_FAILED;
-                    return itemResult;
-                }
-            }
-            if (vCalendar.isTodo()) {
-                // create or update task method
-                EWSMethod.Item newItem = new EWSMethod.Item();
-                newItem.type = "Task";
-                List<FieldUpdate> updates = new ArrayList<FieldUpdate>();
-                updates.add(Field.createFieldUpdate("importance", convertPriorityToExchange(vCalendar.getFirstVeventPropertyValue("PRIORITY"))));
-                updates.add(Field.createFieldUpdate("calendaruid", vCalendar.getFirstVeventPropertyValue("UID")));
-                // force urlcompname
-                updates.add(Field.createFieldUpdate("urlcompname", convertItemNameToEML(itemName)));
-                updates.add(Field.createFieldUpdate("subject", vCalendar.getFirstVeventPropertyValue("SUMMARY")));
-                updates.add(Field.createFieldUpdate("description", vCalendar.getFirstVeventPropertyValue("DESCRIPTION")));
-                updates.add(Field.createFieldUpdate("keywords", vCalendar.getFirstVeventPropertyValue("CATEGORIES")));
-                updates.add(Field.createFieldUpdate("startdate", convertTaskDateToZulu(vCalendar.getFirstVeventPropertyValue("DTSTART"))));
-                updates.add(Field.createFieldUpdate("duedate", convertTaskDateToZulu(vCalendar.getFirstVeventPropertyValue("DUE"))));
-                updates.add(Field.createFieldUpdate("datecompleted", convertTaskDateToZulu(vCalendar.getFirstVeventPropertyValue("COMPLETED"))));
-
-                updates.add(Field.createFieldUpdate("commonstart", convertTaskDateToZulu(vCalendar.getFirstVeventPropertyValue("DTSTART"))));
-                updates.add(Field.createFieldUpdate("commonend", convertTaskDateToZulu(vCalendar.getFirstVeventPropertyValue("DUE"))));
-
-                String percentComplete = vCalendar.getFirstVeventPropertyValue("PERCENT-COMPLETE");
-                if (percentComplete == null) {
-                    percentComplete = "0";
-                }
-                updates.add(Field.createFieldUpdate("percentcomplete", percentComplete));
-                String vTodoStatus = vCalendar.getFirstVeventPropertyValue("STATUS");
-                if (vTodoStatus == null) {
-                    updates.add(Field.createFieldUpdate("taskstatus", "NotStarted"));
-                } else {
-                    updates.add(Field.createFieldUpdate("taskstatus", vTodoToTaskStatusMap.get(vTodoStatus)));
-                }
-
-                //updates.add(Field.createFieldUpdate("iscomplete", "COMPLETED".equals(vTodoStatus)?"True":"False"));
-
-                if (currentItemId != null) {
-                    // update
-                    createOrUpdateItemMethod = new UpdateItemMethod(MessageDisposition.SaveOnly,
-                            ConflictResolution.AutoResolve,
-                            SendMeetingInvitationsOrCancellations.SendToNone,
-                            currentItemId, updates);
-                } else {
-                    newItem.setFieldUpdates(updates);
-                    // create
-                    createOrUpdateItemMethod = new CreateItemMethod(MessageDisposition.SaveOnly, SendMeetingInvitations.SendToNone, getFolderId(folderPath), newItem);
-                }
-
-            } else {
-
-                if (currentItemId != null) {
-                    /*Set<FieldUpdate> updates = new HashSet<FieldUpdate>();
-                    // TODO: update properties instead of brute force delete/add
-                    updates.add(new FieldUpdate(Field.get("mimeContent"), new String(Base64.encodeBase64(itemContent))));
-                    // update
-                    createOrUpdateItemMethod = new UpdateItemMethod(MessageDisposition.SaveOnly,
-                           ConflictResolution.AutoResolve,
-                           SendMeetingInvitationsOrCancellations.SendToNone,
-                           currentItemId, updates);*/
-                    // hard method: delete/create on update
-                    DeleteItemMethod deleteItemMethod = new DeleteItemMethod(currentItemId, DeleteType.HardDelete, SendMeetingCancellations.SendToNone);
-                    executeMethod(deleteItemMethod);
-                } //else {
-                // create
-                EWSMethod.Item newItem = new EWSMethod.Item();
-                newItem.type = "CalendarItem";
-                newItem.mimeContent = Base64.encodeBase64(vCalendar.toString().getBytes("UTF-8"));
-                ArrayList<FieldUpdate> updates = new ArrayList<FieldUpdate>();
-                if (!vCalendar.hasVAlarm()) {
-                    updates.add(Field.createFieldUpdate("reminderset", "false"));
-                }
-                //updates.add(Field.createFieldUpdate("outlookmessageclass", "IPM.Appointment"));
-                // force urlcompname
-                updates.add(Field.createFieldUpdate("urlcompname", convertItemNameToEML(itemName)));
-                if (vCalendar.isMeeting()) {
-                    if (vCalendar.isMeetingOrganizer()) {
-                        updates.add(Field.createFieldUpdate("apptstateflags", "1"));
-                    } else {
-                        updates.add(Field.createFieldUpdate("apptstateflags", "3"));
-                    }
-                } else {
-                    updates.add(Field.createFieldUpdate("apptstateflags", "0"));
-                }
-                // store mozilla invitations option
-                String xMozSendInvitations = vCalendar.getFirstVeventPropertyValue("X-MOZ-SEND-INVITATIONS");
-                if (xMozSendInvitations != null) {
-                    updates.add(Field.createFieldUpdate("xmozsendinvitations", xMozSendInvitations));
-                }
-                // handle mozilla alarm
-                String xMozLastack = vCalendar.getFirstVeventPropertyValue("X-MOZ-LASTACK");
-                if (xMozLastack != null) {
-                    updates.add(Field.createFieldUpdate("xmozlastack", xMozLastack));
-                }
-                String xMozSnoozeTime = vCalendar.getFirstVeventPropertyValue("X-MOZ-SNOOZE-TIME");
-                if (xMozSnoozeTime != null) {
-                    updates.add(Field.createFieldUpdate("xmozsnoozetime", xMozSnoozeTime));
-                }
-
-                if (vCalendar.isMeeting() && "Exchange2007_SP1".equals(serverVersion)) {
-                    Set<String> requiredAttendees = new HashSet<String>();
-                    Set<String> optionalAttendees = new HashSet<String>();
-                    List<VProperty> attendeeProperties = vCalendar.getFirstVeventProperties("ATTENDEE");
-                    if (attendeeProperties != null) {
-                        for (VProperty property : attendeeProperties) {
-                            String attendeeEmail = vCalendar.getEmailValue(property);
-                            if (attendeeEmail != null && attendeeEmail.indexOf('@') >= 0) {
-                                if (email.equals(attendeeEmail)) {
-                                    String ownerPartStat = property.getParamValue("PARTSTAT");
-                                    if ("ACCEPTED".equals(ownerPartStat)) {
-                                        ownerResponseReply = "AcceptItem";
-                                        // do not send DeclineItem to avoid deleting target event
-                                        //} else if  ("DECLINED".equals(ownerPartStat)) {
-                                        //    ownerResponseReply = "DeclineItem";
-                                    } else if ("TENTATIVE".equals(ownerPartStat)) {
-                                        ownerResponseReply = "TentativelyAcceptItem";
-                                    }
-                                }
-                                InternetAddress internetAddress = new InternetAddress(attendeeEmail, property.getParamValue("CN"));
-                                String attendeeRole = property.getParamValue("ROLE");
-                                if ("REQ-PARTICIPANT".equals(attendeeRole)) {
-                                    requiredAttendees.add(internetAddress.toString());
-                                } else {
-                                    optionalAttendees.add(internetAddress.toString());
-                                }
-                            }
-                        }
-                    }
-                    List<VProperty> organizerProperties = vCalendar.getFirstVeventProperties("ORGANIZER");
-                    if (organizerProperties != null) {
-                        VProperty property = organizerProperties.get(0);
-                        String organizerEmail = vCalendar.getEmailValue(property);
-                        if (organizerEmail != null && organizerEmail.indexOf('@') >= 0) {
-                            updates.add(Field.createFieldUpdate("from", organizerEmail));
-                        }
-                    }
-
-                    if (requiredAttendees.size() > 0) {
-                        updates.add(Field.createFieldUpdate("to", StringUtil.join(requiredAttendees, ", ")));
-                    }
-                    if (optionalAttendees.size() > 0) {
-                        updates.add(Field.createFieldUpdate("cc", StringUtil.join(optionalAttendees, ", ")));
-                    }
-                }
-
-                // patch allday date values, only on 2007
-                if ("Exchange2007_SP1".equals(serverVersion) && vCalendar.isCdoAllDay()) {
-                    updates.add(Field.createFieldUpdate("dtstart", convertCalendarDateToExchange(vCalendar.getFirstVeventPropertyValue("DTSTART"))));
-                    updates.add(Field.createFieldUpdate("dtend", convertCalendarDateToExchange(vCalendar.getFirstVeventPropertyValue("DTEND"))));
-                }
-                updates.add(Field.createFieldUpdate("busystatus", "BUSY".equals(vCalendar.getFirstVeventPropertyValue("X-MICROSOFT-CDO-BUSYSTATUS")) ? "Busy" : "Free"));
-                if ("Exchange2007_SP1".equals(serverVersion) && vCalendar.isCdoAllDay()) {
-                    updates.add(Field.createFieldUpdate("meetingtimezone", vCalendar.getVTimezone().getPropertyValue("TZID")));
-                }
-
-                newItem.setFieldUpdates(updates);
-                createOrUpdateItemMethod = new CreateItemMethod(MessageDisposition.SaveOnly, SendMeetingInvitations.SendToNone, getFolderId(folderPath), newItem);
-                // force context Timezone on Exchange 2010
-                if (serverVersion != null && serverVersion.startsWith("Exchange2010")) {
-                    createOrUpdateItemMethod.setTimezoneContext(EwsExchangeSession.this.getVTimezone().getPropertyValue("TZID"));
-                }
-                //}
-            }
-            executeMethod(createOrUpdateItemMethod);
-
-            itemResult.status = createOrUpdateItemMethod.getStatusCode();
-            if (itemResult.status == HttpURLConnection.HTTP_OK) {
-                //noinspection VariableNotUsedInsideIf
-                if (currentItemId == null) {
-                    itemResult.status = HttpStatus.SC_CREATED;
-                    LOGGER.debug("Created event " + getHref());
-                } else {
-                    LOGGER.warn("Overwritten event " + getHref());
-                }
-            }
-
-            // force responsetype on Exchange 2007
-            if (ownerResponseReply != null) {
-                EWSMethod.Item responseTypeItem = new EWSMethod.Item();
-                responseTypeItem.referenceItemId = new ItemId("ReferenceItemId", createOrUpdateItemMethod.getResponseItem());
-                responseTypeItem.type = ownerResponseReply;
-                createOrUpdateItemMethod = new CreateItemMethod(MessageDisposition.SaveOnly, SendMeetingInvitations.SendToNone, null, responseTypeItem);
-                executeMethod(createOrUpdateItemMethod);
-
-                // force urlcompname again
-                ArrayList<FieldUpdate> updates = new ArrayList<FieldUpdate>();
-                updates.add(Field.createFieldUpdate("urlcompname", convertItemNameToEML(itemName)));
-                createOrUpdateItemMethod = new UpdateItemMethod(MessageDisposition.SaveOnly,
-                        ConflictResolution.AlwaysOverwrite,
-                        SendMeetingInvitationsOrCancellations.SendToNone,
-                        new ItemId(createOrUpdateItemMethod.getResponseItem()),
-                        updates);
-                executeMethod(createOrUpdateItemMethod);
-            }
-
-            ItemId newItemId = new ItemId(createOrUpdateItemMethod.getResponseItem());
-            GetItemMethod getItemMethod = new GetItemMethod(BaseShape.ID_ONLY, newItemId, false);
-            getItemMethod.addAdditionalProperty(Field.get("etag"));
-            executeMethod(getItemMethod);
-            itemResult.etag = getItemMethod.getResponseItem().get(Field.get("etag").getResponseName());
-
-            return itemResult;
-
-        }
-
-        @Override
-        public byte[] getEventContent() throws IOException {
-            byte[] content;
-            if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("Get event: " + itemName);
-            }
-            try {
-                GetItemMethod getItemMethod;
-                if ("Task".equals(type)) {
-                    getItemMethod = new GetItemMethod(BaseShape.ID_ONLY, itemId, false);
-                    getItemMethod.addAdditionalProperty(Field.get("importance"));
-                    getItemMethod.addAdditionalProperty(Field.get("subject"));
-                    getItemMethod.addAdditionalProperty(Field.get("created"));
-                    getItemMethod.addAdditionalProperty(Field.get("lastmodified"));
-                    getItemMethod.addAdditionalProperty(Field.get("calendaruid"));
-                    getItemMethod.addAdditionalProperty(Field.get("description"));
-                    getItemMethod.addAdditionalProperty(Field.get("percentcomplete"));
-                    getItemMethod.addAdditionalProperty(Field.get("taskstatus"));
-                    getItemMethod.addAdditionalProperty(Field.get("startdate"));
-                    getItemMethod.addAdditionalProperty(Field.get("duedate"));
-                    getItemMethod.addAdditionalProperty(Field.get("datecompleted"));
-                    getItemMethod.addAdditionalProperty(Field.get("keywords"));
-
-                } else if (!"Message".equals(type)) {
-                    getItemMethod = new GetItemMethod(BaseShape.ID_ONLY, itemId, true);
-                    getItemMethod.addAdditionalProperty(Field.get("reminderset"));
-                    getItemMethod.addAdditionalProperty(Field.get("calendaruid"));
-                    getItemMethod.addAdditionalProperty(Field.get("myresponsetype"));
-                    getItemMethod.addAdditionalProperty(Field.get("requiredattendees"));
-                    getItemMethod.addAdditionalProperty(Field.get("optionalattendees"));
-                    getItemMethod.addAdditionalProperty(Field.get("modifiedoccurrences"));
-                    getItemMethod.addAdditionalProperty(Field.get("xmozlastack"));
-                    getItemMethod.addAdditionalProperty(Field.get("xmozsnoozetime"));
-                    getItemMethod.addAdditionalProperty(Field.get("xmozsendinvitations"));
-                } else {
-                    getItemMethod = new GetItemMethod(BaseShape.ID_ONLY, itemId, true);
-                }
-
-                executeMethod(getItemMethod);
-                if ("Task".equals(type)) {
-                    VObject vTimezone = getVTimezone();
-                    VCalendar localVCalendar = new VCalendar();
-                    VObject vTodo = new VObject();
-                    vTodo.type = "VTODO";
-                    localVCalendar.setTimezone(vTimezone);
-                    vTodo.setPropertyValue("LAST-MODIFIED", convertDateFromExchange(getItemMethod.getResponseItem().get(Field.get("lastmodified").getResponseName())));
-                    vTodo.setPropertyValue("CREATED", convertDateFromExchange(getItemMethod.getResponseItem().get(Field.get("created").getResponseName())));
-                    String calendarUid = getItemMethod.getResponseItem().get(Field.get("calendaruid").getResponseName());
-                    if (calendarUid == null) {
-                        // use item id as uid for Exchange created tasks
-                        calendarUid = itemId.id;
-                    }
-                    vTodo.setPropertyValue("UID", calendarUid);
-                    vTodo.setPropertyValue("SUMMARY", getItemMethod.getResponseItem().get(Field.get("subject").getResponseName()));
-                    vTodo.setPropertyValue("DESCRIPTION", getItemMethod.getResponseItem().get(Field.get("description").getResponseName()));
-                    vTodo.setPropertyValue("PRIORITY", convertPriorityFromExchange(getItemMethod.getResponseItem().get(Field.get("importance").getResponseName())));
-                    vTodo.setPropertyValue("PERCENT-COMPLETE", getItemMethod.getResponseItem().get(Field.get("percentcomplete").getResponseName()));
-                    vTodo.setPropertyValue("STATUS", taskTovTodoStatusMap.get(getItemMethod.getResponseItem().get(Field.get("taskstatus").getResponseName())));
-
-                    vTodo.setPropertyValue("DUE;VALUE=DATE", convertDateFromExchangeToTaskDate(getItemMethod.getResponseItem().get(Field.get("duedate").getResponseName())));
-                    vTodo.setPropertyValue("DTSTART;VALUE=DATE", convertDateFromExchangeToTaskDate(getItemMethod.getResponseItem().get(Field.get("startdate").getResponseName())));
-                    vTodo.setPropertyValue("COMPLETED;VALUE=DATE", convertDateFromExchangeToTaskDate(getItemMethod.getResponseItem().get(Field.get("datecompleted").getResponseName())));
-
-                    vTodo.setPropertyValue("CATEGORIES", getItemMethod.getResponseItem().get(Field.get("keywords").getResponseName()));
-
-                    localVCalendar.addVObject(vTodo);
-                    content = localVCalendar.toString().getBytes("UTF-8");
-                } else {
-                    content = getItemMethod.getMimeContent();
-                    if (content == null) {
-                        throw new IOException("empty event body");
-                    }
-                    if (!"CalendarItem".equals(type)) {
-                        content = getICS(new SharedByteArrayInputStream(content));
-                    }
-                    VCalendar localVCalendar = new VCalendar(content, email, getVTimezone());
-
-                    String calendaruid = getItemMethod.getResponseItem().get(Field.get("calendaruid").getResponseName());
-
-                    if ("Exchange2007_SP1".equals(serverVersion)) {
-                        // remove additional reminder
-                        if (!"true".equals(getItemMethod.getResponseItem().get(Field.get("reminderset").getResponseName()))) {
-                            localVCalendar.removeVAlarm();
-                        }
-                        if (calendaruid != null) {
-                            localVCalendar.setFirstVeventPropertyValue("UID", calendaruid);
-                        }
-                    }
-                    fixAttendees(getItemMethod, localVCalendar.getFirstVevent());
-                    // fix UID and RECURRENCE-ID, broken at least on Exchange 2007
-                    List<EWSMethod.Occurrence> occurences = getItemMethod.getResponseItem().getOccurrences();
-                    if (occurences != null) {
-                        Iterator<VObject> modifiedOccurrencesIterator = localVCalendar.getModifiedOccurrences().iterator();
-                        for (EWSMethod.Occurrence occurrence : occurences) {
-                            if (modifiedOccurrencesIterator.hasNext()) {
-                                VObject modifiedOccurrence = modifiedOccurrencesIterator.next();
-                                // fix modified occurrences attendees
-                                GetItemMethod getOccurrenceMethod = new GetItemMethod(BaseShape.ID_ONLY, occurrence.itemId, false);
-                                getOccurrenceMethod.addAdditionalProperty(Field.get("requiredattendees"));
-                                getOccurrenceMethod.addAdditionalProperty(Field.get("optionalattendees"));
-                                getOccurrenceMethod.addAdditionalProperty(Field.get("modifiedoccurrences"));
-                                executeMethod(getOccurrenceMethod);
-                                fixAttendees(getOccurrenceMethod, modifiedOccurrence);
-
-                                if ("Exchange2007_SP1".equals(serverVersion)) {
-                                    // fix uid, should be the same as main VEVENT
-                                    if (calendaruid != null) {
-                                        modifiedOccurrence.setPropertyValue("UID", calendaruid);
-                                    }
-
-                                    VProperty recurrenceId = modifiedOccurrence.getProperty("RECURRENCE-ID");
-                                    if (recurrenceId != null) {
-                                        recurrenceId.removeParam("TZID");
-                                        recurrenceId.getValues().set(0, convertDateFromExchange(occurrence.originalStart));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // restore mozilla invitations option
-                    localVCalendar.setFirstVeventPropertyValue("X-MOZ-SEND-INVITATIONS",
-                            getItemMethod.getResponseItem().get(Field.get("xmozsendinvitations").getResponseName()));
-                    // restore mozilla alarm status
-                    localVCalendar.setFirstVeventPropertyValue("X-MOZ-LASTACK",
-                            getItemMethod.getResponseItem().get(Field.get("xmozlastack").getResponseName()));
-                    localVCalendar.setFirstVeventPropertyValue("X-MOZ-SNOOZE-TIME",
-                            getItemMethod.getResponseItem().get(Field.get("xmozsnoozetime").getResponseName()));
-                    // overwrite method
-                    // localVCalendar.setPropertyValue("METHOD", "REQUEST");
-                    content = localVCalendar.toString().getBytes("UTF-8");
-                }
-            } catch (IOException e) {
-                throw buildHttpException(e);
-            } catch (MessagingException e) {
-                throw buildHttpException(e);
-            }
-            return content;
-        }
-
-        protected void fixAttendees(GetItemMethod getItemMethod, VObject vEvent) throws EWSException {
-            List<EWSMethod.Attendee> attendees = getItemMethod.getResponseItem().getAttendees();
-            if (attendees != null) {
-                for (EWSMethod.Attendee attendee : attendees) {
-                    VProperty attendeeProperty = new VProperty("ATTENDEE", "mailto:" + attendee.email);
-                    attendeeProperty.addParam("CN", attendee.name);
-                    String myResponseType = getItemMethod.getResponseItem().get(Field.get("myresponsetype").getResponseName());
-                    if ("Exchange2007_SP1".equals(serverVersion) && email.equalsIgnoreCase(attendee.email) && myResponseType != null) {
-                        attendeeProperty.addParam("PARTSTAT", EWSMethod.responseTypeToPartstat(myResponseType));
-                    } else {
-                        attendeeProperty.addParam("PARTSTAT", attendee.partstat);
-                    }
-                    //attendeeProperty.addParam("RSVP", "TRUE");
-                    attendeeProperty.addParam("ROLE", attendee.role);
-                    vEvent.addProperty(attendeeProperty);
-                }
-            }
-        }
-    }
-
     @Override
-    public List<ExchangeSession.Contact> searchContacts(String folderPath, Set<String> attributes, Condition condition, int maxCount) throws IOException {
-        List<ExchangeSession.Contact> contacts = new ArrayList<ExchangeSession.Contact>();
+    public List<Contact> searchContacts(String folderPath, Set<String> attributes, Condition condition, int maxCount) throws IOException {
         List<EWSMethod.Item> responses = searchItems(folderPath, attributes, condition,
                 FolderQueryTraversal.SHALLOW, maxCount);
 
+        List<Contact> contacts = new ArrayList<Contact>(responses.size());
         for (EWSMethod.Item response : responses) {
-            contacts.add(new Contact(response));
+            contacts.add(new EwsContact(this, response));
         }
         return contacts;
     }
@@ -1789,20 +1104,20 @@ public class EwsExchangeSession extends ExchangeSession {
     }
 
     @Override
-    public List<ExchangeSession.Event> getEventMessages(String folderPath) throws IOException {
+    public List<Event> getEventMessages(String folderPath) throws IOException {
         return searchEvents(folderPath, ITEM_PROPERTIES,
                 and(startsWith("outlookmessageclass", "IPM.Schedule.Meeting."),
                         or(isNull("processed"), isFalse("processed"))));
     }
 
     @Override
-    public List<ExchangeSession.Event> searchEvents(String folderPath, Set<String> attributes, Condition condition) throws IOException {
-        List<ExchangeSession.Event> events = new ArrayList<ExchangeSession.Event>();
+    public List<Event> searchEvents(String folderPath, Set<String> attributes, Condition condition) throws IOException {
+        List<Event> events = new ArrayList<Event>();
         List<EWSMethod.Item> responses = searchItems(folderPath, attributes,
                 condition,
                 FolderQueryTraversal.SHALLOW, 0);
         for (EWSMethod.Item response : responses) {
-            Event event = new Event(response);
+            EwsEvent event = new EwsEvent(this, response);
             if ("Message".equals(event.type)) {
                 // TODO: just exclude
                 // need to check body
@@ -1907,13 +1222,13 @@ public class EwsExchangeSession extends ExchangeSession {
             if (item == null) {
                 throw new HttpNotFoundException(itemName + " not found in " + folderPath);
             }
-            return new Contact(item);
+            return new EwsContact(this, item);
         } else if ("CalendarItem".equals(itemType)
                 || "MeetingRequest".equals(itemType)
                 || "Task".equals(itemType)
                 // VTODOs appear as Messages
                 || "Message".equals(itemType)) {
-            return new Event(item);
+            return new EwsEvent(this, item);
         } else {
             throw new HttpNotFoundException(itemName + " not found in " + folderPath);
         }
@@ -1921,10 +1236,10 @@ public class EwsExchangeSession extends ExchangeSession {
     }
 
     @Override
-    public ContactPhoto getContactPhoto(ExchangeSession.Contact contact) throws IOException {
+    public ContactPhoto getContactPhoto(Contact contact) throws IOException {
         ContactPhoto contactPhoto = null;
 
-        GetItemMethod getItemMethod = new GetItemMethod(BaseShape.ID_ONLY, ((EwsExchangeSession.Contact) contact).itemId, false);
+        GetItemMethod getItemMethod = new GetItemMethod(BaseShape.ID_ONLY, ((EwsContact) contact).itemId, false);
         getItemMethod.addAdditionalProperty(Field.get("attachments"));
         executeMethod(getItemMethod);
         EWSMethod.Item item = getItemMethod.getResponseItem();
@@ -1980,7 +1295,7 @@ public class EwsExchangeSession extends ExchangeSession {
     @Override
     public int sendEvent(String icsBody) throws IOException {
         String itemName = UUID.randomUUID().toString() + ".EML";
-        byte[] mimeContent = new Event(DRAFTS, itemName, "urn:content-classes:calendarmessage", icsBody, null, null).createMimeContent();
+        byte[] mimeContent = new EwsEvent(this, DRAFTS, itemName, "urn:content-classes:calendarmessage", icsBody, null, null).createMimeContent();
         if (mimeContent == null) {
             // no recipients, cancel
             return HttpStatus.SC_NO_CONTENT;
@@ -1992,12 +1307,12 @@ public class EwsExchangeSession extends ExchangeSession {
 
     @Override
     protected ItemResult internalCreateOrUpdateContact(String folderPath, String itemName, Map<String, String> properties, String etag, String noneMatch) throws IOException {
-        return new Contact(folderPath, itemName, properties, StringUtil.removeQuotes(etag), noneMatch).createOrUpdate();
+        return new EwsContact(this, folderPath, itemName, properties, StringUtil.removeQuotes(etag), noneMatch).createOrUpdate();
     }
 
     @Override
     protected ItemResult internalCreateOrUpdateEvent(String folderPath, String itemName, String contentClass, String icsBody, String etag, String noneMatch) throws IOException {
-        return new Event(folderPath, itemName, contentClass, icsBody, StringUtil.removeQuotes(etag), noneMatch).createOrUpdate();
+        return new EwsEvent(this, folderPath, itemName, contentClass, icsBody, StringUtil.removeQuotes(etag), noneMatch).createOrUpdate();
     }
 
     @Override
@@ -2264,8 +1579,8 @@ public class EwsExchangeSession extends ExchangeSession {
         IGNORE_ATTRIBUTE_SET.add("AssistantPhone");
     }
 
-    protected Contact buildGalfindContact(EWSMethod.Item response) {
-        Contact contact = new Contact();
+    protected EwsContact buildGalfindContact(EWSMethod.Item response) {
+        EwsContact contact = new EwsContact(this);
         contact.setName(response.get("Name"));
         contact.put("imapUid", response.get("Name"));
         contact.put("uid", response.get("Name"));
@@ -2287,27 +1602,27 @@ public class EwsExchangeSession extends ExchangeSession {
     }
 
     @Override
-    public Map<String, ExchangeSession.Contact> galFind(Condition condition, Set<String> returningAttributes, int sizeLimit) throws IOException {
-        Map<String, ExchangeSession.Contact> contacts = new HashMap<String, ExchangeSession.Contact>();
+    public Map<String, Contact> galFind(Condition condition, Set<String> returningAttributes, int sizeLimit) throws IOException {
+        Map<String, Contact> contacts = new HashMap<String, Contact>();
         if (condition instanceof MultiCondition) {
-            List<Condition> conditions = ((ExchangeSession.MultiCondition) condition).getConditions();
-            Operator operator = ((ExchangeSession.MultiCondition) condition).getOperator();
+            List<Condition> conditions = ((MultiCondition) condition).getConditions();
+            Operator operator = ((MultiCondition) condition).getOperator();
             if (operator == Operator.Or) {
                 for (Condition innerCondition : conditions) {
                     contacts.putAll(galFind(innerCondition, returningAttributes, sizeLimit));
                 }
             } else if (operator == Operator.And && !conditions.isEmpty()) {
-                Map<String, ExchangeSession.Contact> innerContacts = galFind(conditions.get(0), returningAttributes, sizeLimit);
-                for (ExchangeSession.Contact contact : innerContacts.values()) {
+                Map<String, Contact> innerContacts = galFind(conditions.get(0), returningAttributes, sizeLimit);
+                for (Contact contact : innerContacts.values()) {
                     if (condition.isMatch(contact)) {
                         contacts.put(contact.getName().toLowerCase(), contact);
                     }
                 }
             }
         } else if (condition instanceof AttributeCondition) {
-            String mappedAttributeName = GALFIND_ATTRIBUTE_MAP.get(((ExchangeSession.AttributeCondition) condition).getAttributeName());
+            String mappedAttributeName = GALFIND_ATTRIBUTE_MAP.get(((davmail.exchange.condition.AttributeCondition) condition).getAttributeName());
             if (mappedAttributeName != null) {
-                String value = ((ExchangeSession.AttributeCondition) condition).getValue().toLowerCase();
+                String value = ((AttributeCondition) condition).getValue().toLowerCase();
                 Operator operator = ((AttributeCondition) condition).getOperator();
                 String searchValue = value;
                 if (mappedAttributeName.startsWith("EmailAddress")) {
@@ -2323,7 +1638,7 @@ public class EwsExchangeSession extends ExchangeSession {
                     LOGGER.debug("ResolveNames(" + searchValue + ") returned " + responses.size() + " results");
                 }
                 for (EWSMethod.Item response : responses) {
-                    Contact contact = buildGalfindContact(response);
+                    EwsContact contact = buildGalfindContact(response);
                     if (condition.isMatch(contact)) {
                         contacts.put(contact.getName().toLowerCase(), contact);
                     }
