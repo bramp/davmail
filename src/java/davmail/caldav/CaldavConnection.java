@@ -81,8 +81,8 @@ public class CaldavConnection extends AbstractConnection {
      *
      * @param clientSocket Caldav client socket
      */
-    public CaldavConnection(Socket clientSocket) {
-        super(CaldavConnection.class.getSimpleName(), clientSocket, "UTF-8");
+    public CaldavConnection(Socket clientSocket,  ExchangeSessionFactory sessionFactory) {
+        super(CaldavConnection.class.getSimpleName(), clientSocket, "UTF-8", sessionFactory);
         // set caldav logging to davmail logging level
         wireLogger.setLevel(Settings.getLoggingLevel("davmail"));
     }
@@ -164,7 +164,7 @@ public class CaldavConnection extends AbstractConnection {
                     decodeCredentials(headers.get("authorization"));
                     // need to check session on each request, credentials may have changed or session expired
                     try {
-                        session = ExchangeSessionFactory.getInstance(userName, password);
+                        session = sessionFactory.getInstance(userName, password);
                         handleRequest(command, path, headers, content);
                     } catch (DavMailAuthenticationException e) {
                         if (Settings.getBooleanProperty("davmail.enableKerberos")) {

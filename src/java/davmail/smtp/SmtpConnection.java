@@ -59,7 +59,7 @@ public class SmtpConnection extends AbstractConnection {
     public void run() {
 
         try {
-            ExchangeSessionFactory.checkConfig();
+            sessionFactory.checkConfig();
             sendClient("220 DavMail " + DavGateway.getCurrentVersion() + " SMTP ready at " + new Date());
             for (; ;) {
                 String line = readClient();
@@ -238,7 +238,7 @@ public class SmtpConnection extends AbstractConnection {
      */
     protected void authenticate() throws IOException {
         try {
-            session = ExchangeSessionFactory.getInstance(userName, password);
+            session = sessionFactory.getInstance(userName, password);
             sendClient("235 OK Authenticated");
             state = State.AUTHENTICATED;
         } catch (Exception e) {

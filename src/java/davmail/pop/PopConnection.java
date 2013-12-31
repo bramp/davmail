@@ -93,7 +93,7 @@ public class PopConnection extends AbstractConnection {
         StringTokenizer tokens;
 
         try {
-            ExchangeSessionFactory.checkConfig();
+            sessionFactory.checkConfig();
             sendOK("DavMail " + DavGateway.getCurrentVersion() + " POP ready at " + new Date());
 
             for (; ;) {
@@ -200,7 +200,7 @@ public class PopConnection extends AbstractConnection {
             // bug 2194492 : allow space in password
             password = line.substring("PASS".length() + 1);
             try {
-                session = ExchangeSessionFactory.getInstance(userName, password);
+                session = sessionFactory.getInstance(userName, password);
                 sendOK("PASS");
                 state = State.AUTHENTICATED;
             } catch (SocketException e) {

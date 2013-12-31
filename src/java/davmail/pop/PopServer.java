@@ -22,6 +22,7 @@ package davmail.pop;
 import davmail.AbstractConnection;
 import davmail.AbstractServer;
 import davmail.Settings;
+import davmail.exchange.ExchangeSessionFactory;
 
 import java.net.Socket;
 
@@ -40,8 +41,8 @@ public class PopServer extends AbstractServer {
      *
      * @param port pop listen port, 110 if not defined (0)
      */
-    public PopServer(int port) {
-        super(PopServer.class.getName(), port, PopServer.DEFAULT_PORT);
+    public PopServer(int port, ExchangeSessionFactory sessionFactory) {
+        super(PopServer.class.getName(), port, PopServer.DEFAULT_PORT, sessionFactory);
         nosslFlag = Settings.getBooleanProperty("davmail.ssl.nosecurepop");
     }
 

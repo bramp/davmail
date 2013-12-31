@@ -108,7 +108,8 @@ public class TestCaldav extends AbstractDavMailTestCase {
             httpClient.getState().setCredentials(authScope, new NTCredentials(Settings.getProperty("davmail.username"), Settings.getProperty("davmail.password"), "", ""));
         }
         if (session == null) {
-            session = ExchangeSessionFactory.getInstance(Settings.getProperty("davmail.username"), Settings.getProperty("davmail.password"));
+            ExchangeSessionFactory sessionFactory = DavGateway.getSessionFactory();
+            session = sessionFactory.getInstance(Settings.getProperty("davmail.username"), Settings.getProperty("davmail.password"));
         }
     }
 

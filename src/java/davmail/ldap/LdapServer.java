@@ -21,6 +21,7 @@ package davmail.ldap;
 import davmail.AbstractConnection;
 import davmail.AbstractServer;
 import davmail.Settings;
+import davmail.exchange.ExchangeSessionFactory;
 
 import java.net.Socket;
 
@@ -39,8 +40,8 @@ public class LdapServer extends AbstractServer {
      *
      * @param port pop listen port, 389 if not defined (0)
      */
-    public LdapServer(int port) {
-        super(LdapServer.class.getName(), port, LdapServer.DEFAULT_PORT);
+    public LdapServer(int port, ExchangeSessionFactory sessionFactory) {
+        super(LdapServer.class.getName(), port, LdapServer.DEFAULT_PORT, sessionFactory);
         nosslFlag = Settings.getBooleanProperty("davmail.ssl.nosecureldap");
     }
 
@@ -51,6 +52,6 @@ public class LdapServer extends AbstractServer {
 
     @Override
     public AbstractConnection createConnectionHandler(Socket clientSocket) {
-        return new LdapConnection(clientSocket);
+        return new LdapConnection(clientSocket, sessionFactory);
     }
 }

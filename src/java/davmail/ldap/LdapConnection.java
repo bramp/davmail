@@ -389,8 +389,8 @@ public class LdapConnection extends AbstractConnection {
      *
      * @param clientSocket LDAP client socket
      */
-    public LdapConnection(Socket clientSocket) {
-        super(LdapConnection.class.getSimpleName(), clientSocket);
+    public LdapConnection(Socket clientSocket, ExchangeSessionFactory sessionFactory) {
+        super(LdapConnection.class.getSimpleName(), clientSocket, sessionFactory);
         try {
             is = new BufferedInputStream(client.getInputStream());
             os = new BufferedOutputStream(client.getOutputStream());
@@ -414,7 +414,7 @@ public class LdapConnection extends AbstractConnection {
         boolean eos;    // End of stream
 
         try {
-            ExchangeSessionFactory.checkConfig();
+            sessionFactory.checkConfig();
             while (true) {
                 offset = 0;
 
@@ -571,7 +571,7 @@ public class LdapConnection extends AbstractConnection {
                         if (callback instanceof NameCallback) {
                             userName = ((NameCallback) callback).getDefaultName();
                             // get password from session pool
-                            password = ExchangeSessionFactory.getUserPassword(userName);
+                            password = sessionFactory.getUserPassword(userName);
                         }
                     }
                     // handle other callbacks
@@ -594,7 +594,7 @@ public class LdapConnection extends AbstractConnection {
 
                 DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_USER", currentMessageId, userName));
                 try {
-                    session = ExchangeSessionFactory.getInstance(userName, password);
+                    session = sessionFactory.getInstance(userName, password);
                     DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_SUCCESS"));
                 } catch (IOException e) {
                     serverResponse = EMPTY_BYTE_ARRAY;
@@ -631,7 +631,7 @@ public class LdapConnection extends AbstractConnection {
             if (userName.length() > 0 && password.length() > 0) {
                 DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_USER", currentMessageId, userName));
                 try {
-                    session = ExchangeSessionFactory.getInstance(userName, password);
+                    session = sessionFactory.getInstance(userName, password);
                     DavGatewayTray.debug(new BundleMessage("LOG_LDAP_REQ_BIND_SUCCESS"));
                     sendClient(currentMessageId, LDAP_REP_BIND, LDAP_SUCCESS, "");
                 } catch (IOException e) {

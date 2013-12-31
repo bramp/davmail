@@ -22,6 +22,7 @@ package davmail.imap;
 import davmail.AbstractConnection;
 import davmail.AbstractServer;
 import davmail.Settings;
+import davmail.exchange.ExchangeSessionFactory;
 
 import java.net.Socket;
 
@@ -40,8 +41,8 @@ public class ImapServer extends AbstractServer {
      *
      * @param port imap listen port, 143 if not defined (0)
      */
-    public ImapServer(int port) {
-        super(ImapServer.class.getName(), port, ImapServer.DEFAULT_PORT);
+    public ImapServer(int port, ExchangeSessionFactory sessionFactory) {
+        super(ImapServer.class.getName(), port, ImapServer.DEFAULT_PORT, sessionFactory);
         nosslFlag = Settings.getBooleanProperty("davmail.ssl.nosecureimap");
     }
 
@@ -52,7 +53,7 @@ public class ImapServer extends AbstractServer {
 
     @Override
     public AbstractConnection createConnectionHandler(Socket clientSocket) {
-        return new ImapConnection(clientSocket);
+        return new ImapConnection(clientSocket, sessionFactory);
     }
 
 }

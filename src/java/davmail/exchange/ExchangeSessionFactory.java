@@ -42,10 +42,10 @@ import java.util.Map;
  * Create ExchangeSession instances.
  */
 public final class ExchangeSessionFactory {
-    private static final Object LOCK = new Object();
-    private static final Map<PoolKey, ExchangeSession> POOL_MAP = new HashMap<PoolKey, ExchangeSession>();
-    private static boolean configChecked;
-    private static boolean errorSent;
+    private final Object LOCK = new Object();
+    private final Map<PoolKey, ExchangeSession> POOL_MAP = new HashMap<PoolKey, ExchangeSession>();
+    private boolean configChecked;
+    private boolean errorSent;
 
     static class PoolKey {
         final String url;
@@ -73,7 +73,7 @@ public final class ExchangeSessionFactory {
         }
     }
 
-    private ExchangeSessionFactory() {
+    public ExchangeSessionFactory() {
     }
 
     /**
@@ -84,7 +84,7 @@ public final class ExchangeSessionFactory {
      * @return authenticated session
      * @throws IOException on error
      */
-    public static ExchangeSession getInstance(String userName, String password) throws IOException {
+    public ExchangeSession getInstance(String userName, String password) throws IOException {
         String baseUrl = Settings.getProperty("davmail.url");
         if (Settings.getBooleanProperty("davmail.server")) {
             return getInstance(baseUrl, userName, password);
@@ -115,7 +115,7 @@ public final class ExchangeSessionFactory {
      * @return authenticated session
      * @throws IOException on error
      */
-    public static ExchangeSession getInstance(String baseUrl, String userName, String password) throws IOException {
+    public ExchangeSession getInstance(String baseUrl, String userName, String password) throws IOException {
         ExchangeSession session = null;
         try {
 
@@ -187,7 +187,7 @@ public final class ExchangeSessionFactory {
      * @return authenticated session
      * @throws IOException on error
      */
-    public static ExchangeSession getInstance(ExchangeSession currentSession, String userName, String password)
+    public ExchangeSession getInstance(ExchangeSession currentSession, String userName, String password)
             throws IOException {
         ExchangeSession session = currentSession;
         try {
@@ -217,7 +217,7 @@ public final class ExchangeSessionFactory {
      *
      * @throws IOException if unable to access Exchange server
      */
-    public static void checkConfig() throws IOException {
+    public void checkConfig() throws IOException {
         String url = Settings.getProperty("davmail.url");
         if (url == null || (!url.startsWith("http://") && !url.startsWith("https://"))) {
              throw new DavMailException("LOG_INVALID_URL", url);
@@ -244,7 +244,7 @@ public final class ExchangeSessionFactory {
 
     }
 
-    private static void handleNetworkDown(Exception exc) throws DavMailException {
+    private void handleNetworkDown(Exception exc) throws DavMailException {
         if (!checkNetwork() || configChecked) {
             ExchangeSession.LOGGER.warn(BundleMessage.formatLog("EXCEPTION_NETWORK_DOWN"));
             // log full stack trace for unknown errors
@@ -273,7 +273,7 @@ public final class ExchangeSessionFactory {
      * @param userName Exchange user name
      * @return user password
      */
-    public static String getUserPassword(String userName) {
+    public String getUserPassword(String userName) {
         String fullUserName = convertUserName(userName);
         for (PoolKey poolKey : POOL_MAP.keySet()) {
             if (poolKey.userName.equals(fullUserName)) {
@@ -288,7 +288,7 @@ public final class ExchangeSessionFactory {
      *
      * @return true if network available
      */
-    static boolean checkNetwork() {
+    boolean checkNetwork() {
         boolean up = false;
         Enumeration<NetworkInterface> enumeration;
         try {
@@ -311,7 +311,7 @@ public final class ExchangeSessionFactory {
     /**
      * Reset config check status and clear session pool.
      */
-    public static void reset() {
+    public void reset() {
         configChecked = false;
         errorSent = false;
         POOL_MAP.clear();

@@ -45,6 +45,7 @@ public final class DavGateway {
     private static final Logger LOGGER = Logger.getLogger(DavGateway.class);
     private static final String HTTP_DAVMAIL_SOURCEFORGE_NET_VERSION_TXT = "http://davmail.sourceforge.net/version.txt";
 
+    private static ExchangeSessionFactory sessionFactory = new ExchangeSessionFactory();
     private static boolean stopped;
 
     private DavGateway() {
@@ -106,23 +107,23 @@ public final class DavGateway {
 
         int smtpPort = Settings.getIntProperty("davmail.smtpPort");
         if (smtpPort != 0) {
-            SERVER_LIST.add(new SmtpServer(smtpPort));
+            SERVER_LIST.add(new SmtpServer(smtpPort, sessionFactory));
         }
         int popPort = Settings.getIntProperty("davmail.popPort");
         if (popPort != 0) {
-            SERVER_LIST.add(new PopServer(popPort));
+            SERVER_LIST.add(new PopServer(popPort, sessionFactory));
         }
         int imapPort = Settings.getIntProperty("davmail.imapPort");
         if (imapPort != 0) {
-            SERVER_LIST.add(new ImapServer(imapPort));
+            SERVER_LIST.add(new ImapServer(imapPort, sessionFactory));
         }
         int caldavPort = Settings.getIntProperty("davmail.caldavPort");
         if (caldavPort != 0) {
-            SERVER_LIST.add(new CaldavServer(caldavPort));
+            SERVER_LIST.add(new CaldavServer(caldavPort, sessionFactory));
         }
         int ldapPort = Settings.getIntProperty("davmail.ldapPort");
         if (ldapPort != 0) {
-            SERVER_LIST.add(new LdapServer(ldapPort));
+            SERVER_LIST.add(new LdapServer(ldapPort, sessionFactory));
         }
 
         BundleMessage.BundleMessageList messages = new BundleMessage.BundleMessageList();
@@ -171,7 +172,7 @@ public final class DavGateway {
         // close pooled connections
         DavGatewayHttpClientFacade.stop();
         // clear session cache
-        ExchangeSessionFactory.reset();
+        sessionFactory.reset();
         DavGatewayTray.info(new BundleMessage("LOG_GATEWAY_STOP"));
         DavGatewayTray.dispose();
     }
@@ -182,7 +183,7 @@ public final class DavGateway {
     public static void restart() {
         DavGateway.stopServers();
         // clear session cache
-        ExchangeSessionFactory.reset();
+        sessionFactory.reset();
         DavGateway.start();
     }
 
@@ -243,5 +244,9 @@ public final class DavGateway {
             }
         }
         return version;
+    }
+
+    public static ExchangeSessionFactory getSessionFactory() {
+        return sessionFactory;
     }
 }

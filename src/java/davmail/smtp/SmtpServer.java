@@ -21,6 +21,7 @@ package davmail.smtp;
 import davmail.AbstractConnection;
 import davmail.AbstractServer;
 import davmail.Settings;
+import davmail.exchange.ExchangeSessionFactory;
 
 import java.net.Socket;
 
@@ -39,8 +40,8 @@ public class SmtpServer extends AbstractServer {
      *
      * @param port smtp port
      */
-    public SmtpServer(int port) {
-        super(SmtpServer.class.getName(), port, SmtpServer.DEFAULT_PORT);
+    public SmtpServer(int port, ExchangeSessionFactory sessionFactory) {
+        super(SmtpServer.class.getName(), port, SmtpServer.DEFAULT_PORT, sessionFactory);
         nosslFlag = Settings.getBooleanProperty("davmail.ssl.nosecuresmtp");
     }
 

@@ -26,8 +26,9 @@ public class TestExchangeSession {
         ExchangeSession session;
         // test auth
         try {
-            ExchangeSessionFactory.checkConfig();
-            session = ExchangeSessionFactory.getInstance(argv[currentArg++], argv[currentArg]);
+            ExchangeSessionFactory sessionFactory = new ExchangeSessionFactory();
+            sessionFactory.checkConfig();
+            session = sessionFactory.getInstance(argv[currentArg++], argv[currentArg]);
 
             ExchangeSession.Folder folder = session.getFolder("INBOX");
             folder.loadMessages();

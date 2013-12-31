@@ -97,7 +97,8 @@ public class TestSmtp extends AbstractDavMailTestCase {
             assertEquals("235 OK Authenticated", readLine());
         }
         if (session == null) {
-            session = ExchangeSessionFactory.getInstance(Settings.getProperty("davmail.username"), Settings.getProperty("davmail.password"));
+            ExchangeSessionFactory sessionFactory = DavGateway.getSessionFactory();
+            session = sessionFactory.getInstance(Settings.getProperty("davmail.username"), Settings.getProperty("davmail.password"));
         }
     }
 

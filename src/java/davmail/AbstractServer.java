@@ -19,6 +19,7 @@
 package davmail;
 
 import davmail.exception.DavMailException;
+import davmail.exchange.ExchangeSessionFactory;
 import davmail.ui.tray.DavGatewayTray;
 
 import javax.net.ServerSocketFactory;
@@ -37,8 +38,9 @@ import java.security.KeyStore;
  */
 public abstract class AbstractServer extends Thread {
     protected boolean nosslFlag; // will cause same behavior as before with unchanged config files
-    private final int port;
-    private ServerSocket serverSocket;
+    protected final int port;
+    protected final ExchangeSessionFactory sessionFactory;
+    protected ServerSocket serverSocket;
 
     /**
      * Get server protocol name (SMTP, POP, IMAP, ...).
@@ -64,7 +66,7 @@ public abstract class AbstractServer extends Thread {
      * @param port        tcp socket chosen port
      * @param defaultPort tcp socket default port
      */
-    public AbstractServer(String name, int port, int defaultPort) {
+    public AbstractServer(String name, int port, int defaultPort, ExchangeSessionFactory sessionFactory) {
         super(name);
         setDaemon(true);
         if (port == 0) {
@@ -72,6 +74,7 @@ public abstract class AbstractServer extends Thread {
         } else {
             this.port = port;
         }
+        this.sessionFactory = sessionFactory;
     }
 
     /**

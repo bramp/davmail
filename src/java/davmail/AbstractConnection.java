@@ -19,6 +19,7 @@
 package davmail;
 
 import davmail.exchange.ExchangeSession;
+import davmail.exchange.ExchangeSessionFactory;
 import davmail.io.LineReaderInputStream;
 import davmail.ui.tray.DavGatewayTray;
 import org.apache.commons.codec.binary.Base64;
@@ -37,6 +38,7 @@ public class AbstractConnection extends Thread {
     }
 
     protected final Socket client;
+    protected final ExchangeSessionFactory sessionFactory;
 
     protected LineReaderInputStream in;
     protected OutputStream os;
@@ -54,9 +56,10 @@ public class AbstractConnection extends Thread {
      * @param name         thread type name
      * @param clientSocket client socket
      */
-    public AbstractConnection(String name, Socket clientSocket) {
+    public AbstractConnection(String name, Socket clientSocket, ExchangeSessionFactory sessionFactory) {
         super(name + '-' + clientSocket.getPort());
         this.client = clientSocket;
+        this.sessionFactory = sessionFactory;
         setDaemon(true);
     }
 
@@ -67,9 +70,11 @@ public class AbstractConnection extends Thread {
      * @param clientSocket client socket
      * @param encoding     socket stream encoding
      */
-    public AbstractConnection(String name, Socket clientSocket, String encoding) {
+    public AbstractConnection(String name, Socket clientSocket, String encoding, ExchangeSessionFactory sessionFactory) {
         super(name + '-' + clientSocket.getPort());
         this.client = clientSocket;
+        this.sessionFactory = sessionFactory;
+
         try {
             in = new LineReaderInputStream(client.getInputStream(), encoding);
             os = new BufferedOutputStream(client.getOutputStream());

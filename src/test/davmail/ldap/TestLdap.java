@@ -67,7 +67,8 @@ public class TestLdap extends AbstractExchangeSessionTestCase {
             }
         }
         if (session == null) {
-            session = ExchangeSessionFactory.getInstance(Settings.getProperty("davmail.username"), Settings.getProperty("davmail.password"));
+            ExchangeSessionFactory sessionFactory = DavGateway.getSessionFactory();
+            session = sessionFactory.getInstance(Settings.getProperty("davmail.username"), Settings.getProperty("davmail.password"));
         }
     }
 

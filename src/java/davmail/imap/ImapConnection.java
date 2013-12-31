@@ -65,8 +65,8 @@ public class ImapConnection extends AbstractConnection {
      *
      * @param clientSocket IMAP client socket
      */
-    public ImapConnection(Socket clientSocket) {
-        super(ImapConnection.class.getSimpleName(), clientSocket, "UTF-8");
+    public ImapConnection(Socket clientSocket, ExchangeSessionFactory sessionFactory) {
+        super(ImapConnection.class.getSimpleName(), clientSocket, "UTF-8", sessionFactory);
 
         imapIdleDelay = Settings.getIntProperty("davmail.imapIdleDelay") * 60;
         if (imapIdleDelay > 0) {
@@ -82,7 +82,7 @@ public class ImapConnection extends AbstractConnection {
         String commandId = null;
         IMAPTokenizer tokens;
         try {
-            ExchangeSessionFactory.checkConfig();
+            sessionFactory.checkConfig();
             sendClient("* OK [" + capabilities + "] IMAP4rev1 DavMail " + DavGateway.getCurrentVersion() + " server ready");
             for (; ; ) {
                 line = readClient();
@@ -122,7 +122,7 @@ public class ImapConnection extends AbstractConnection {
                                 sendClient(commandId + " BAD command authentication required");
                             } else {
                                 // check for expired session
-                                session = ExchangeSessionFactory.getInstance(session, userName, password);
+                                session = sessionFactory.getInstance(session, userName, password);
                                 if ("lsub".equalsIgnoreCase(command) || "list".equalsIgnoreCase(command)) {
                                     handleList(tokens, commandId, command);
 
@@ -251,7 +251,7 @@ public class ImapConnection extends AbstractConnection {
         // detect shared mailbox access
         splitUserName();
         try {
-            session = ExchangeSessionFactory.getInstance(userName, password);
+            session = sessionFactory.getInstance(userName, password);
             sendClient(commandId + " OK Authenticated");
             state = State.AUTHENTICATED;
         } catch (Exception e) {
@@ -278,7 +278,7 @@ public class ImapConnection extends AbstractConnection {
                     sendClient("+ " + base64Encode("Password:"));
                     state = State.PASSWORD;
                     password = base64Decode(readClient());
-                    session = ExchangeSessionFactory.getInstance(userName, password);
+                    session = sessionFactory.getInstance(userName, password);
                     sendClient(commandId + " OK Authenticated");
                     state = State.AUTHENTICATED;
                 } catch (Exception e) {
