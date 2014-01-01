@@ -11,6 +11,7 @@ mvn install:install-file -DgroupId=org.samba.jcifs -DartifactId=jcifs -Dversion=
 mvn install:install-file -DgroupId=javax.mail -DartifactId=mail -Dversion=1.4.3 -Dpackaging=jar -Dfile=lib/mail-1.4.3.jar
 mvn install:install-file -DgroupId=net.freeutils.charset -DartifactId=jcharset -Dversion=1.3 -Dpackaging=jar -Dfile=lib/jcharset-1.3.jar
 mvn install:install-file -DgroupId=org.boris.winrun4j -DartifactId=winrun4j -Dversion=0.4.4 -Dpackaging=jar -Dfile=lib/winrun4j-0.4.4.jar
+mvn install:install-file -DgroupId=info.growl -DartifactId=libgrowl -Dversion=0.2 -Dpackaging=jar -Dfile=lib/libgrowl-0.2.jar
 - generate site: mvn site
 - upload site: ant upload-site
 - upload releasenotes.txt to sourceforge
