@@ -20,6 +20,7 @@ package davmail.exchange.ews;
 
 import davmail.BundleMessage;
 import davmail.Settings;
+import davmail.exchange.ExchangeVersion;
 import davmail.exchange.XMLStreamUtil;
 import davmail.http.DavGatewayHttpClientFacade;
 import davmail.ui.tray.DavGatewayTray;
@@ -84,7 +85,7 @@ public abstract class EWSMethod extends PostMethod {
     protected SearchExpression searchExpression;
     protected FieldOrder fieldOrder;
 
-    protected String serverVersion;
+    protected ExchangeVersion serverVersion;
     protected String timezoneContext;
 
     /**
@@ -343,7 +344,7 @@ public abstract class EWSMethod extends PostMethod {
             writer.write("<soap:Header>");
             if (serverVersion != null) {
                 writer.write("<t:RequestServerVersion Version=\"");
-                writer.write(serverVersion);
+                writer.write(serverVersion.toString());
                 writer.write("\"/>");
             }
             if (timezoneContext != null) {
@@ -441,7 +442,7 @@ public abstract class EWSMethod extends PostMethod {
      *
      * @return server version
      */
-    public String getServerVersion() {
+    public ExchangeVersion getServerVersion() {
         return serverVersion;
     }
 
@@ -450,7 +451,7 @@ public abstract class EWSMethod extends PostMethod {
      *
      * @param serverVersion server version
      */
-    public void setServerVersion(String serverVersion) {
+    public void setServerVersion(ExchangeVersion serverVersion) {
         this.serverVersion = serverVersion;
     }
 
@@ -1096,12 +1097,12 @@ public abstract class EWSMethod extends PostMethod {
                     if ("14".equals(majorVersion)) {
                         String minorVersion = getAttributeValue(reader, "MinorVersion");
                         if ("0".equals(minorVersion)) {
-                            serverVersion = "Exchange2010";
+                            serverVersion = ExchangeVersion.Exchange2010;
                         } else {
-                            serverVersion = "Exchange2010_SP1";
+                            serverVersion = ExchangeVersion.Exchange2010_SP1;
                         }
                     } else {
-                        serverVersion = "Exchange2007_SP1";
+                        serverVersion = ExchangeVersion.Exchange2007_SP1;
                     }
                 } else if (XMLStreamUtil.isStartTag(reader, "RootFolder")) {
                     includesLastItemInRange = "true".equals(reader.getAttributeValue(null, "IncludesLastItemInRange"));

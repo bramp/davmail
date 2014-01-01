@@ -1,9 +1,6 @@
 package davmail.exchange.ews;
 
-import davmail.exchange.ExchangeSession;
-import davmail.exchange.VCalendar;
-import davmail.exchange.VObject;
-import davmail.exchange.VProperty;
+import davmail.exchange.*;
 import davmail.exchange.entity.ItemResult;
 import davmail.util.StringUtil;
 import org.apache.commons.codec.binary.Base64;
@@ -192,7 +189,7 @@ class EwsEvent extends davmail.exchange.entity.Event {
                 updates.add(Field.createFieldUpdate("xmozsnoozetime", xMozSnoozeTime));
             }
 
-            if (vCalendar.isMeeting() && "Exchange2007_SP1".equals(exchangeSession.getServerVersion())) {
+            if (vCalendar.isMeeting() && exchangeSession.getServerVersion().isExchange2007()) {
                 Set<String> requiredAttendees = new HashSet<String>();
                 Set<String> optionalAttendees = new HashSet<String>();
                 List<VProperty> attendeeProperties = vCalendar.getFirstVeventProperties("ATTENDEE");
@@ -239,19 +236,20 @@ class EwsEvent extends davmail.exchange.entity.Event {
             }
 
             // patch allday date values, only on 2007
-            if ("Exchange2007_SP1".equals(exchangeSession.getServerVersion()) && vCalendar.isCdoAllDay()) {
+            boolean isAllDayExchange2007 = exchangeSession.getServerVersion().isExchange2007() && vCalendar.isCdoAllDay();
+            if (isAllDayExchange2007) {
                 updates.add(Field.createFieldUpdate("dtstart", ewsExchangeSession.convertCalendarDateToExchange(vCalendar.getFirstVeventPropertyValue("DTSTART"))));
                 updates.add(Field.createFieldUpdate("dtend", ewsExchangeSession.convertCalendarDateToExchange(vCalendar.getFirstVeventPropertyValue("DTEND"))));
             }
             updates.add(Field.createFieldUpdate("busystatus", "BUSY".equals(vCalendar.getFirstVeventPropertyValue("X-MICROSOFT-CDO-BUSYSTATUS")) ? "Busy" : "Free"));
-            if ("Exchange2007_SP1".equals(exchangeSession.getServerVersion()) && vCalendar.isCdoAllDay()) {
+            if (isAllDayExchange2007) {
                 updates.add(Field.createFieldUpdate("meetingtimezone", vCalendar.getVTimezone().getPropertyValue("TZID")));
             }
 
             newItem.setFieldUpdates(updates);
             createOrUpdateItemMethod = new CreateItemMethod(MessageDisposition.SaveOnly, SendMeetingInvitations.SendToNone, ewsExchangeSession.getFolderId(folderPath), newItem);
             // force context Timezone on Exchange 2010
-            if (exchangeSession.getServerVersion() != null && exchangeSession.getServerVersion().startsWith("Exchange2010")) {
+            if (exchangeSession.getServerVersion().isExchange2010()) {
                 createOrUpdateItemMethod.setTimezoneContext(ewsExchangeSession.getVTimezone().getPropertyValue("TZID"));
             }
             //}
@@ -376,7 +374,7 @@ class EwsEvent extends davmail.exchange.entity.Event {
 
                 String calendaruid = getItemMethod.getResponseItem().get(Field.get("calendaruid").getResponseName());
 
-                if ("Exchange2007_SP1".equals(exchangeSession.getServerVersion())) {
+                if (exchangeSession.getServerVersion().isExchange2007()) {
                     // remove additional reminder
                     if (!"true".equals(getItemMethod.getResponseItem().get(Field.get("reminderset").getResponseName()))) {
                         localVCalendar.removeVAlarm();
@@ -401,7 +399,7 @@ class EwsEvent extends davmail.exchange.entity.Event {
                             ewsExchangeSession.executeMethod(getOccurrenceMethod);
                             fixAttendees(getOccurrenceMethod, modifiedOccurrence);
 
-                            if ("Exchange2007_SP1".equals(exchangeSession.getServerVersion())) {
+                            if (exchangeSession.getServerVersion().isExchange2007()) {
                                 // fix uid, should be the same as main VEVENT
                                 if (calendaruid != null) {
                                     modifiedOccurrence.setPropertyValue("UID", calendaruid);
@@ -443,7 +441,7 @@ class EwsEvent extends davmail.exchange.entity.Event {
                 VProperty attendeeProperty = new VProperty("ATTENDEE", "mailto:" + attendee.email);
                 attendeeProperty.addParam("CN", attendee.name);
                 String myResponseType = getItemMethod.getResponseItem().get(Field.get("myresponsetype").getResponseName());
-                if ("Exchange2007_SP1".equals(exchangeSession.getServerVersion()) && ewsExchangeSession.email.equalsIgnoreCase(attendee.email) && myResponseType != null) {
+                if (exchangeSession.getServerVersion().isExchange2007() && ewsExchangeSession.email.equalsIgnoreCase(attendee.email) && myResponseType != null) {
                     attendeeProperty.addParam("PARTSTAT", EWSMethod.responseTypeToPartstat(myResponseType));
                 } else {
                     attendeeProperty.addParam("PARTSTAT", attendee.partstat);

@@ -131,7 +131,7 @@ public class DavExchangeSession extends ExchangeSession {
     @Override
     public boolean isExpired() throws NoRouteToHostException, UnknownHostException {
         // experimental: try to reset session timeout
-        if ("Exchange2007".equals(serverVersion)) {
+        if (serverVersion.isExchange2007()) {
             GetMethod getMethod = null;
             try {
                 getMethod = new GetMethod("/owa/");
@@ -248,7 +248,7 @@ public class DavExchangeSession extends ExchangeSession {
      * @return cmd base path
      */
     public String getCmdBasePath() {
-        if (("Exchange2003".equals(serverVersion) || PUBLIC_ROOT.equals(publicFolderUrl)) && mailPath != null) {
+        if ((serverVersion.isExchange2003() || PUBLIC_ROOT.equals(publicFolderUrl)) && mailPath != null) {
             // public folder is not available => try to use mailbox path
             // Note: This does not work with freebusy, which requires /public/
             return mailPath;
@@ -558,7 +558,7 @@ public class DavExchangeSession extends ExchangeSession {
         //noinspection VariableNotUsedInsideIf
         if (mailPath != null) {
             // Exchange 2003
-            serverVersion = "Exchange2003";
+            serverVersion = ExchangeVersion.Exchange2003;
             fixClientHost(method);
             checkPublicFolder();
             try {
@@ -568,7 +568,7 @@ public class DavExchangeSession extends ExchangeSession {
             }
         } else {
             // Exchange 2007 : get alias and email from options page
-            serverVersion = "Exchange2007";
+            serverVersion = ExchangeVersion.Exchange2007;
 
             // Gallookup is an Exchange 2003 only feature
             disableGalLookup = true;
@@ -916,7 +916,7 @@ public class DavExchangeSession extends ExchangeSession {
 
     @Override
     public Condition isTrue(String attributeName) {
-        if ("Exchange2003".equals(this.serverVersion) && "deleted".equals(attributeName)) {
+        if (serverVersion.isExchange2003() && "deleted".equals(attributeName)) {
             return isEqualTo(attributeName, "1");
         } else {
             return new DavMonoCondition(attributeName, Operator.IsTrue);
@@ -925,7 +925,7 @@ public class DavExchangeSession extends ExchangeSession {
 
     @Override
     public Condition isFalse(String attributeName) {
-        if ("Exchange2003".equals(this.serverVersion) && "deleted".equals(attributeName)) {
+        if (serverVersion.isExchange2003() && "deleted".equals(attributeName)) {
             return or(isEqualTo(attributeName, "0"), isNull(attributeName));
         } else {
             return new DavMonoCondition(attributeName, Operator.IsFalse);
@@ -1582,7 +1582,7 @@ public class DavExchangeSession extends ExchangeSession {
             createCalendarFolder(folderPath, null);
 
             String fakeEventUrl = null;
-            if ("Exchange2003".equals(serverVersion)) {
+            if (serverVersion.isExchange2003()) {
                 PostMethod postMethod = new PostMethod(URIUtil.encodePath(folderPath));
                 postMethod.addParameter("Cmd", "saveappt");
                 postMethod.addParameter("FORMTYPE", "appointment");

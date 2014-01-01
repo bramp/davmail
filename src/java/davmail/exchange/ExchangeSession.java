@@ -134,7 +134,7 @@ public abstract class ExchangeSession {
      */
     private String preAuthUsername;
 
-    protected String serverVersion;
+    protected ExchangeVersion serverVersion;
 
     protected static final String YYYY_MM_DD_HH_MM_SS = "yyyy/MM/dd HH:mm:ss";
     private static final String YYYYMMDD_T_HHMMSS_Z = "yyyyMMdd'T'HHmmss'Z'";
@@ -841,7 +841,7 @@ public abstract class ExchangeSession {
      *
      * @return server version
      */
-    public String getServerVersion() {
+    public ExchangeVersion getServerVersion() {
         return serverVersion;
     }
 
@@ -1100,7 +1100,7 @@ public abstract class ExchangeSession {
         convertResentHeader(mimeMessage, "Message-Id");
 
         // do not allow send as another user on Exchange 2003
-        if ("Exchange2003".equals(serverVersion) || Settings.getBooleanProperty("davmail.smtpStripFrom", false)) {
+        if (serverVersion.isExchange2003() || Settings.getBooleanProperty("davmail.smtpStripFrom", false)) {
             mimeMessage.removeHeader("From");
         }
 

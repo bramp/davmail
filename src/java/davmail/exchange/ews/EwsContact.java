@@ -2,6 +2,7 @@ package davmail.exchange.ews;
 
 import davmail.exception.DavMailException;
 import davmail.exchange.ExchangeSession;
+import davmail.exchange.ExchangeVersion;
 import davmail.exchange.entity.ItemResult;
 import davmail.util.IOUtil;
 import davmail.util.StringUtil;
@@ -175,7 +176,7 @@ class EwsContact extends davmail.exchange.entity.Contact {
         ItemId newItemId = new ItemId(createOrUpdateItemMethod.getResponseItem());
 
         // disable contact picture handling on Exchange 2007
-        if (!"Exchange2007_SP1".equals(ewsExchangeSession.getServerVersion())) {
+        if (!exchangeSession.getServerVersion().isExchange2007()) {
             // first delete current picture
             if (currentFileAttachment != null) {
                 DeleteAttachmentMethod deleteAttachmentMethod = new DeleteAttachmentMethod(currentFileAttachment.attachmentId);

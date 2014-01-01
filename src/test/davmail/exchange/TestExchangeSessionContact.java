@@ -179,7 +179,7 @@ public class TestExchangeSessionContact extends AbstractExchangeSessionTestCase 
         assertEquals("http://fburl", contact.get("fburl"));
 
         assertEquals("true", contact.get("haspicture"));
-        if (!Settings.getBooleanProperty("davmail.enableEws") || "Exchange2010".equals(session.getServerVersion())) {
+        if (!Settings.getBooleanProperty("davmail.enableEws") || session.getServerVersion().isExchange2010() ) {
             assertNotNull(session.getContactPhoto(contact));
         }
     }

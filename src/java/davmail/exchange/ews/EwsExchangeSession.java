@@ -812,7 +812,7 @@ public class EwsExchangeSession extends ExchangeSession {
 
     @Override
     public Condition headerIsEqualTo(String headerName, String value) {
-        if (serverVersion.startsWith("Exchange2010")) {
+        if (serverVersion.isExchange2010()) {
             if ("from".equals(headerName)
                     || "to".equals(headerName)
                     || "cc".equals(headerName)) {
@@ -1337,7 +1337,7 @@ public class EwsExchangeSession extends ExchangeSession {
 
         try {
             String timezoneId = null;
-            if (!"Exchange2007_SP1".equals(serverVersion)) {
+            if (!serverVersion.isExchange2007()) {
                 GetUserConfigurationMethod getUserConfigurationMethod = new GetUserConfigurationMethod();
                 executeMethod(getUserConfigurationMethod);
                 EWSMethod.Item item = getUserConfigurationMethod.getResponseItem();
@@ -1360,7 +1360,7 @@ public class EwsExchangeSession extends ExchangeSession {
             createCalendarFolder("davmailtemp", null);
             EWSMethod.Item item = new EWSMethod.Item();
             item.type = "CalendarItem";
-            if (!"Exchange2007_SP1".equals(serverVersion)) {
+            if (!serverVersion.isExchange2007()) {
                 SimpleDateFormat dateFormatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ENGLISH);
                 dateFormatter.setTimeZone(GMT_TIMEZONE);
                 Calendar cal = Calendar.getInstance();
