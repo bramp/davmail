@@ -7,9 +7,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.PushbackInputStream;
 
-/**
-* @author bramp
-*/
 public class LineReaderInputStream extends PushbackInputStream {
     final String encoding;
 

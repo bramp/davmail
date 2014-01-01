@@ -14,9 +14,6 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.util.*;
 
-/**
-* @author bramp
-*/
 class EwsEvent extends davmail.exchange.entity.Event {
     protected static final Logger LOGGER = Logger.getLogger("davmail.exchange.ExchangeSession");
 

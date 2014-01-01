@@ -2,9 +2,6 @@ package davmail.exchange.ews;
 
 import davmail.exchange.ExchangeSession;
 
-/**
-* @author bramp
-*/
 class HeaderCondition extends EwsExchangeSession.AttributeCondition {
 
     HeaderCondition(String attributeName, String value) {

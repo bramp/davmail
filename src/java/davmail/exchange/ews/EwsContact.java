@@ -16,9 +16,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/**
-* @author bramp
-*/
 class EwsContact extends davmail.exchange.entity.Contact {
     protected static final Logger LOGGER = Logger.getLogger("davmail.exchange.ExchangeSession");
 

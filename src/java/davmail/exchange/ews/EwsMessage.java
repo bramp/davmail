@@ -6,9 +6,6 @@ import org.apache.log4j.Logger;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 
-/**
-* @author bramp
-*/
 class EwsMessage extends davmail.exchange.entity.Message {
     protected static final Logger LOGGER = Logger.getLogger("davmail.exchange.ExchangeSession");
 
